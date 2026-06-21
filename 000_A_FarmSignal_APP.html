@@ -3715,6 +3715,21 @@ let fieldDataLoaded=false;
 // Parses a planting date from the GeoJSON's DOP property -- handles a
 // plain ISO/locale date string, or an Excel serial number (in case it
 // comes through as a number rather than a formatted string).
+// Field Details' planting date comes through SheetJS in a DIFFERENT
+// convention than the GeoJSON's DOP (M/D/YY, American-style, already
+// proven correct against this exact file earlier this session on the
+// desktop dashboard) -- deliberately NOT using parseDOP's DD-MM-YYYY
+// reinterpretation here, since that's specific to the GeoJSON's format.
+function parseFieldDetailsDate(val){
+  if(val===null || val===undefined || val==='') return null;
+  if(typeof val==='number'){
+    const ms=Math.round((val-25569)*86400*1000);
+    return new Date(ms);
+  }
+  const d=new Date(String(val).trim());
+  return isNaN(d.getTime()) ? null : d;
+}
+
 function parseDOP(val){
   if(val===null || val===undefined || val==='') return null;
   if(typeof val==='number'){
@@ -3722,7 +3737,28 @@ function parseDOP(val){
     const ms=Math.round((val-25569)*86400*1000);
     return new Date(ms);
   }
-  const d=new Date(String(val).trim());
+  const s=String(val).trim();
+
+  // Explicit DD-MM-YYYY / DD/MM/YYYY handling -- this is the actual format
+  // used in the real GeoJSON ('02-03-2026' = 2 March 2026). JS's native
+  // Date constructor silently misreads this as MM-DD-YYYY whenever the
+  // day is <=12 (American convention), giving a VALID but WRONG date --
+  // not an error, just silently incorrect. Whenever day>12 it correctly
+  // fails as invalid instead, which is what showed up as the visible
+  // "missing planting date" plots. Both cases are the same root format
+  // mismatch -- this handles it explicitly rather than guessing.
+  const m=s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+  if(m){
+    const day=parseInt(m[1],10), month=parseInt(m[2],10), year=parseInt(m[3],10);
+    if(month>=1 && month<=12 && day>=1 && day<=31){
+      const d=new Date(year, month-1, day);
+      if(!isNaN(d.getTime())) return d;
+    }
+  }
+
+  // Fall back to native parsing for any other format (e.g. ISO YYYY-MM-DD,
+  // which IS unambiguous and safe to let the native parser handle).
+  const d=new Date(s);
   return isNaN(d.getTime()) ? null : d;
 }
 
@@ -3873,7 +3909,7 @@ async function loadFieldDataFromGitHub(){
               const pid=String(row[plotKey]).trim();
               if(!pid) return;
               fieldDetailsRaw[pid]=row[dateKey];
-              const d=parseDOP(row[dateKey]);
+              const d=parseFieldDetailsDate(row[dateKey]);
               if(d) plantDateByPlot[pid]=d;
             });
           }
