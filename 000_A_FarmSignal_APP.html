@@ -2869,7 +2869,7 @@ function buildMapLayers(){
 
     // Circle marker — low zoom
     const marker=L.circleMarker(item.centroid,{
-      radius:11, color:h.border, weight:2.5, fillColor:h.fill, fillOpacity:0.9
+      radius:7, color:h.border, weight:2, fillColor:h.fill, fillOpacity:0.9
     });
     marker.bindTooltip(
       `<b style="color:#2C2C2A">${f.name}</b><br>
@@ -3709,6 +3709,7 @@ const GITHUB_GEOJSON_URL='https://raw.githubusercontent.com/farmsignal2026/rs_ma
 const GITHUB_ZIP_URL='https://raw.githubusercontent.com/farmsignal2026/rs_maps/main/NDVI_PNGs_20Jun2026.zip';
 const GITHUB_NDVI_URL='https://raw.githubusercontent.com/farmsignal2026/rs_maps/main/NDVItrends_20Jun2026_all.xlsx';
 const GITHUB_PIXELCLASS_URL='https://raw.githubusercontent.com/farmsignal2026/rs_maps/main/NDVI_PixelClass_20Jun2026.xlsx';
+const GITHUB_FIELDDETAILS_URL='https://raw.githubusercontent.com/farmsignal2026/rs_maps/main/Tab_2_Field_details.xlsx';
 let fieldDataLoaded=false;
 
 // Parses a planting date from the GeoJSON's DOP property -- handles a
@@ -3851,7 +3852,40 @@ async function loadFieldDataFromGitHub(){
       console.warn('Pixel classification failed to load (continuing without pixel breakdown):', pcErr.message);
     }
 
+    // Field Details is the preferred source for planting date -- same
+    // file/column matching already proven on the desktop dashboard all
+    // session (handles the real-world date quirks found there). GeoJSON's
+    // DOP property, if present, is only used as a fallback for any plot
+    // missing from this file.
+    let plantDateByPlot={};
+    try{
+      const fdResp=await fetch(GITHUB_FIELDDETAILS_URL);
+      if(fdResp.ok){
+        const wb=XLSX.read(await fdResp.arrayBuffer(), {type:'array', cellDates:true});
+        const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {raw:false, dateNF:'yyyy-mm-dd'});
+        if(rows.length){
+          const cols=Object.keys(rows[0]);
+          const plotKey=cols.find(k=>/^plot.?no\.?$/i.test(k)) || cols.find(k=>/plot/i.test(k)&&/no/i.test(k));
+          const dateKey=cols.find(k=>/planting/i.test(k)&&/date/i.test(k));
+          if(plotKey && dateKey){
+            rows.forEach(row=>{
+              const pid=String(row[plotKey]).trim();
+              if(!pid) return;
+              const d=parseDOP(row[dateKey]);
+              if(d) plantDateByPlot[pid]=d;
+            });
+          }
+        }
+        console.log('Loaded planting dates for '+Object.keys(plantDateByPlot).length+' plots from Field Details');
+      } else {
+        console.warn('Field Details file not found (HTTP '+fdResp.status+') -- falling back to GeoJSON DOP only');
+      }
+    }catch(fdErr){
+      console.warn('Field Details failed to load (falling back to GeoJSON DOP only):', fdErr.message);
+    }
+
     const newFields=[], newGeo=[];
+    let diagNoNdviMatch=0, diagNoPlantDate=0, diagBothOk=0;
     (geo.features||[]).forEach(feat=>{
       const props=feat.properties||{};
       const pks=Object.keys(props);
@@ -3889,7 +3923,10 @@ async function loadFieldDataFromGitHub(){
       // back to the 'unknown' placeholders for any plot missing a
       // planting date or NDVI history -- never guess.
       const ndviInfo=ndviByPlot[code];
-      const plantDate=dopKey?parseDOP(props[dopKey]):null;
+      const plantDate=plantDateByPlot[code] || (dopKey?parseDOP(props[dopKey]):null);
+      if(ndviInfo && plantDate) diagBothOk++;
+      else if(!ndviInfo) diagNoNdviMatch++;
+      else if(!plantDate) diagNoPlantDate++;
       let geoEntry={
         code, centroid:[lat,lng], polygon,
         ndvi:null, prevNdvi:undefined, prevDate:'',
@@ -3951,6 +3988,15 @@ async function loadFieldDataFromGitHub(){
     fieldDataLoaded=true;
     const withNdvi=newGeo.filter(g=>g.ndvi!==null).length;
     console.log('Loaded '+newFields.length+' plots from GitHub, '+Object.keys(pngMap).length+' with mosaic images, '+withNdvi+' with real NDVI/stage data');
+    console.log('Diagnostic -- both OK: '+diagBothOk+', no NDVI match: '+diagNoNdviMatch+', no plant date: '+diagNoPlantDate);
+    if(diagNoNdviMatch>0 || diagNoPlantDate>0){
+      setTimeout(()=>alert(
+        'Field data loaded -- '+newFields.length+' plots total.\n\n'
+        +'Got full real data: '+diagBothOk+'\n'
+        +'Missing (no NDVI match for that plot number): '+diagNoNdviMatch+'\n'
+        +'Missing (no usable planting date in GeoJSON): '+diagNoPlantDate
+      ), 600);
+    }
     return true;
   }catch(err){
     console.error('loadFieldDataFromGitHub failed:', err);
