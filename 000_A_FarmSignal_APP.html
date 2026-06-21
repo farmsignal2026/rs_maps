@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.css"/>
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -3706,7 +3707,42 @@ function togglePw() {
 // EDIT THESE TWO to your actual repo + filenames.
 const GITHUB_GEOJSON_URL='https://raw.githubusercontent.com/farmsignal2026/rs_maps/main/RSCLmap1.geojson';
 const GITHUB_ZIP_URL='https://raw.githubusercontent.com/farmsignal2026/rs_maps/main/NDVI_PNGs_20Jun2026.zip';
+const GITHUB_NDVI_URL='https://raw.githubusercontent.com/farmsignal2026/rs_maps/main/NDVItrends_20Jun2026_all.xlsx';
+const GITHUB_PIXELCLASS_URL='https://raw.githubusercontent.com/farmsignal2026/rs_maps/main/NDVI_PixelClass_20Jun2026.xlsx';
 let fieldDataLoaded=false;
+
+// Parses a planting date from the GeoJSON's DOP property -- handles a
+// plain ISO/locale date string, or an Excel serial number (in case it
+// comes through as a number rather than a formatted string).
+function parseDOP(val){
+  if(val===null || val===undefined || val==='') return null;
+  if(typeof val==='number'){
+    // Excel serial date (days since 1899-12-30)
+    const ms=Math.round((val-25569)*86400*1000);
+    return new Date(ms);
+  }
+  const d=new Date(String(val).trim());
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// Finds which STAGES entry a given age (days after planting) falls into.
+// STAGES uses cumulative end-days (cumEnd), so dayMin is the previous
+// stage's cumEnd (0 for the first stage).
+function stageForAge(age){
+  let dayMin=0;
+  for(let i=0;i<STAGES.length;i++){
+    const s=STAGES[i];
+    if(age>=dayMin && age<=s.cumEnd) return {stage:s, idx:i, dayMin, dayMax:s.cumEnd};
+    dayMin=s.cumEnd;
+  }
+  return null; // beyond Maturity
+}
+
+function statusForNdvi(ndvi, stage){
+  if(ndvi>stage.tMax) return 'good';
+  if(ndvi>=stage.tMin) return 'optimal';
+  return 'attention';
+}
 
 async function loadFieldDataFromGitHub(){
   if(fieldDataLoaded) return true;   // already loaded this session -- don't re-fetch every login
@@ -3736,6 +3772,85 @@ async function loadFieldDataFromGitHub(){
       console.warn('PNG zip failed to load (continuing without images):', zipErr.message);
     }
 
+    // NDVI trends is optional too -- if it fails, plots still show with
+    // boundaries/images, just no NDVI number/stage/health (same graceful
+    // fallback as before this was added).
+    let ndviByPlot={};   // {plotID: {history:[{date,ndvi,confidence}], latest, prev}}
+    try{
+      const ndviResp=await fetch(GITHUB_NDVI_URL);
+      if(ndviResp.ok){
+        const wb=XLSX.read(await ndviResp.arrayBuffer(), {type:'array', cellDates:true});
+        const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {raw:false, dateNF:'yyyy-mm-dd'});
+        const byPlot={};
+        rows.forEach(row=>{
+          const fieldName=row['Field'];
+          if(!fieldName) return;
+          const m=String(fieldName).match(/(\d{6,})\s*$/);   // plot number is the trailing digits
+          if(!m) return;
+          const pid=m[1];
+          const dateVal=row['Date'];
+          const date=dateVal instanceof Date ? dateVal : new Date(String(dateVal));
+          const ndvi=parseFloat(row['Index']);
+          if(isNaN(date.getTime()) || isNaN(ndvi)) return;
+          const confRaw=String(row['Confidence']||'').toLowerCase();
+          const confidence=confRaw.indexOf('low')>=0 ? 'low' : 'high';
+          if(!byPlot[pid]) byPlot[pid]=[];
+          byPlot[pid].push({date, ndvi, confidence});
+        });
+        Object.keys(byPlot).forEach(pid=>{
+          const hist=byPlot[pid].sort((a,b)=>a.date-b.date);
+          // True latest CONFIRMED reading, falling back to latest-of-any
+          // only if nothing confirmed exists -- same pattern as the
+          // desktop dashboard, avoids a stray cloud-spike row looking
+          // like the freshest real data.
+          let latest=null, prev=null;
+          for(let i=hist.length-1;i>=0;i--){
+            if(hist[i].confidence!=='low'){ latest=hist[i]; prev=hist[i-1]||null; break; }
+          }
+          if(!latest){ latest=hist[hist.length-1]; prev=hist[hist.length-2]||null; }
+          ndviByPlot[pid]={history:hist, latest, prev};
+        });
+        console.log('Loaded NDVI history for '+Object.keys(ndviByPlot).length+' plots');
+      } else {
+        console.warn('NDVI trends file not found (HTTP '+ndviResp.status+') -- continuing without NDVI/stage data');
+      }
+    }catch(ndviErr){
+      console.warn('NDVI trends failed to load (continuing without NDVI/stage data):', ndviErr.message);
+    }
+
+    // Pixel Classification is optional too.
+    let pixelByPlot={};   // {plotID: {good, optimal, attention}}
+    try{
+      const pcResp=await fetch(GITHUB_PIXELCLASS_URL);
+      if(pcResp.ok){
+        const wb=XLSX.read(await pcResp.arrayBuffer(), {type:'array', cellDates:true});
+        const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {raw:false});
+        if(rows.length){
+          const cols=Object.keys(rows[0]);
+          const plotKey=cols.find(k=>/^plot.?no$/i.test(k)) || cols.find(k=>/plot/i.test(k)&&/no/i.test(k));
+          const goodKey=cols.find(k=>/good/i.test(k));
+          const modKey=cols.find(k=>/mod(erate)?/i.test(k));
+          const attnKey=cols.find(k=>/att(ention)?/i.test(k));
+          if(plotKey){
+            rows.forEach(row=>{
+              const pid=String(row[plotKey]).trim();
+              if(!pid) return;
+              pixelByPlot[pid]={
+                good: goodKey?parseFloat(row[goodKey])||0:0,
+                optimal: modKey?parseFloat(row[modKey])||0:0,
+                attention: attnKey?parseFloat(row[attnKey])||0:0
+              };
+            });
+          }
+        }
+        console.log('Loaded pixel classification for '+Object.keys(pixelByPlot).length+' plots');
+      } else {
+        console.warn('Pixel classification file not found (HTTP '+pcResp.status+') -- continuing without pixel breakdown');
+      }
+    }catch(pcErr){
+      console.warn('Pixel classification failed to load (continuing without pixel breakdown):', pcErr.message);
+    }
+
     const newFields=[], newGeo=[];
     (geo.features||[]).forEach(feat=>{
       const props=feat.properties||{};
@@ -3759,6 +3874,7 @@ async function loadFieldDataFromGitHub(){
       const varietyKey=pks.find(k=>/variety/i.test(k));
       const typeKey=pks.find(k=>/plot.?type/i.test(k));
       const areaKey=pks.find(k=>/area/i.test(k)&&/ac/i.test(k));
+      const dopKey=pks.find(k=>/^dop$/i.test(k)) || pks.find(k=>/plant/i.test(k)&&/date/i.test(k));
 
       newFields.push({
         name: farmerKey?String(props[farmerKey]).trim():'Unknown farmer',
@@ -3768,20 +3884,64 @@ async function loadFieldDataFromGitHub(){
         type: typeKey?String(props[typeKey]):'', date:'', soil:'', phone:'',
         mapped:true, healthStatus:'unknown'
       });
-      // NDVI/stage/pixel fields explicitly null/empty, not guessed -- this
-      // stopgap only has GeoJSON + PNGs, no NDVI Excel, so there's no real
-      // number to show. showFieldDetailPanel() is updated to display
-      // "No NDVI data" rather than crash on these being missing.
-      newGeo.push({
+
+      // Compute real NDVI/stage/health/pixel data when available; fall
+      // back to the 'unknown' placeholders for any plot missing a
+      // planting date or NDVI history -- never guess.
+      const ndviInfo=ndviByPlot[code];
+      const plantDate=dopKey?parseDOP(props[dopKey]):null;
+      let geoEntry={
         code, centroid:[lat,lng], polygon,
         ndvi:null, prevNdvi:undefined, prevDate:'',
         healthStatus:'unknown', growthStage:'Unknown', growthDays:null,
         thresholdMin:null, thresholdMax:null,
-        pixelDist:{good:0,optimal:0,attention:0},
+        pixelDist: pixelByPlot[code] || {good:0,optimal:0,attention:0},
         lastFetch:'', cloudCover:'',
         stageData:[],
         pngUrl: pngMap[code]||null
-      });
+      };
+
+      if(ndviInfo && plantDate){
+        const age=Math.round((ndviInfo.latest.date-plantDate)/86400000);
+        const sf=stageForAge(age);
+        if(sf){
+          const status=statusForNdvi(ndviInfo.latest.ndvi, sf.stage);
+          geoEntry.ndvi=ndviInfo.latest.ndvi;
+          geoEntry.healthStatus=status;
+          geoEntry.growthStage=sf.stage.name;
+          geoEntry.growthDays=age;
+          geoEntry.thresholdMin=sf.stage.tMin;
+          geoEntry.thresholdMax=sf.stage.tMax;
+          geoEntry.lastFetch=ndviInfo.latest.date.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+          if(ndviInfo.prev){
+            geoEntry.prevNdvi=ndviInfo.prev.ndvi;
+            geoEntry.prevDate=ndviInfo.prev.date.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+          }
+          // Stage timeline -- for each of the 5 stages, find this plot's
+          // latest historical reading that fell within that stage's day
+          // range; mark the current stage; stages not yet reached are
+          // 'future' with no NDVI value (never guessed).
+          geoEntry.stageData=STAGES.map((s,i)=>{
+            const dMin = i===0 ? 0 : STAGES[i-1].cumEnd;
+            const dMax = s.cumEnd;
+            if(dMin>age) return {ndvi:null, status:'future'};
+            let lastInStage=null;
+            ndviInfo.history.forEach(h=>{
+              if(h.confidence==='low') return;
+              const a=Math.round((h.date-plantDate)/86400000);
+              if(a>=dMin && a<=dMax) lastInStage=h;
+            });
+            if(i===sf.idx){
+              return {ndvi:ndviInfo.latest.ndvi, status, current:true};
+            }
+            if(lastInStage) return {ndvi:lastInStage.ndvi, status:statusForNdvi(lastInStage.ndvi, s)};
+            return {ndvi:null, status:'future'};
+          });
+          // Update the field-level health badge too (used in list/preview)
+          newFields[newFields.length-1].healthStatus=status;
+        }
+      }
+      newGeo.push(geoEntry);
     });
 
     if(!newFields.length) throw new Error('GeoJSON had no recognizable plot-number property on any feature.');
@@ -3789,7 +3949,8 @@ async function loadFieldDataFromGitHub(){
     ALL_FIELDS=newFields;
     fieldGeoData=newGeo;
     fieldDataLoaded=true;
-    console.log('Loaded '+newFields.length+' plots from GitHub, '+Object.keys(pngMap).length+' with mosaic images');
+    const withNdvi=newGeo.filter(g=>g.ndvi!==null).length;
+    console.log('Loaded '+newFields.length+' plots from GitHub, '+Object.keys(pngMap).length+' with mosaic images, '+withNdvi+' with real NDVI/stage data');
     return true;
   }catch(err){
     console.error('loadFieldDataFromGitHub failed:', err);
