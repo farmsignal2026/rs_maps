@@ -3858,6 +3858,7 @@ async function loadFieldDataFromGitHub(){
     // DOP property, if present, is only used as a fallback for any plot
     // missing from this file.
     let plantDateByPlot={};
+    let fieldDetailsRaw={};   // {plotID: raw date cell value} -- every plot seen, parsed or not
     try{
       const fdResp=await fetch(GITHUB_FIELDDETAILS_URL);
       if(fdResp.ok){
@@ -3871,6 +3872,7 @@ async function loadFieldDataFromGitHub(){
             rows.forEach(row=>{
               const pid=String(row[plotKey]).trim();
               if(!pid) return;
+              fieldDetailsRaw[pid]=row[dateKey];
               const d=parseDOP(row[dateKey]);
               if(d) plantDateByPlot[pid]=d;
             });
@@ -3886,6 +3888,7 @@ async function loadFieldDataFromGitHub(){
 
     const newFields=[], newGeo=[];
     let diagNoNdviMatch=0, diagNoPlantDate=0, diagBothOk=0;
+    let diagNoPlantDateExamples=[];
     (geo.features||[]).forEach(feat=>{
       const props=feat.properties||{};
       const pks=Object.keys(props);
@@ -3926,7 +3929,17 @@ async function loadFieldDataFromGitHub(){
       const plantDate=plantDateByPlot[code] || (dopKey?parseDOP(props[dopKey]):null);
       if(ndviInfo && plantDate) diagBothOk++;
       else if(!ndviInfo) diagNoNdviMatch++;
-      else if(!plantDate) diagNoPlantDate++;
+      else if(!plantDate){
+        diagNoPlantDate++;
+        if(diagNoPlantDateExamples.length<5){
+          const inFD = code in fieldDetailsRaw;
+          diagNoPlantDateExamples.push(
+            code+' ('+(inFD ? 'in Field Details but unparseable -- raw value: '+JSON.stringify(fieldDetailsRaw[code])
+                             : 'NOT in Field Details')
+            +'; GeoJSON DOP: '+(dopKey?JSON.stringify(props[dopKey]):'no DOP property')+')'
+          );
+        }
+      }
       let geoEntry={
         code, centroid:[lat,lng], polygon,
         ndvi:null, prevNdvi:undefined, prevDate:'',
@@ -3994,7 +4007,8 @@ async function loadFieldDataFromGitHub(){
         'Field data loaded -- '+newFields.length+' plots total.\n\n'
         +'Got full real data: '+diagBothOk+'\n'
         +'Missing (no NDVI match for that plot number): '+diagNoNdviMatch+'\n'
-        +'Missing (no usable planting date in GeoJSON): '+diagNoPlantDate
+        +'Missing (no usable planting date from either source): '+diagNoPlantDate
+        +(diagNoPlantDateExamples.length ? '\n\nExamples:\n'+diagNoPlantDateExamples.join('\n') : '')
       ), 600);
     }
     return true;
