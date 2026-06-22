@@ -2320,7 +2320,7 @@ function renderFields() {
            ● ${hs==='good'?'Good':hs==='optimal'?'Moderate':hs==='serious'?'Need Serious Attention':'Need Attention'}
          </span>`
       : '';
-    const wantsZoom = (activeHealth==='attention' || activeHealth==='serious');
+    const wantsZoom = (activeHealth !== null);
     return `<div class="field-card" onclick="cameFromWatch=${wantsZoom};openPreview(${origIdx})">
       <div class="field-icon ${f.mapped?'mapped':'unmapped'}">
         <i class="ti ${f.mapped?'ti-map-pin-check':'ti-map-pin-exclamation'}"></i>
