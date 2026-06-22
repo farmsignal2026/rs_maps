@@ -1937,6 +1937,7 @@ function getTotalPlots() {
 
 let activeTab = 'unmapped';
 let activeHealth = null;
+let cameFromWatch = false;  // true when reached Preview via Watch banner or a Need-Attention/Serious filtered list -- these want View Map to zoom straight to that field, not show the general overview
 let selectedIdx = 0;
 let capturedPts = [];
 let gpsMode = 'geotag'; // 'geotag' | 'damage'
@@ -2154,7 +2155,7 @@ function renderWatchBanner() {
       <span style="font-size:9px;color:#a07800">&ge; ${WATCH_THRESHOLD.toFixed(2)} drop · ${watchFields[0]?.prevDate} &rarr; ${watchFields[0]?.lastFetch}</span>
     </div>
     ${watchFields.map(w => `
-      <div onclick="openPreview(${fields.indexOf(w.field)})" style="display:flex;align-items:center;justify-content:space-between;
+      <div onclick="cameFromWatch=true;openPreview(${fields.indexOf(w.field)})" style="display:flex;align-items:center;justify-content:space-between;
         padding:8px 10px;background:#fffbe6;border-radius:8px;margin-bottom:5px;cursor:pointer;
         border:1px solid #f0c030;transition:border-color 0.15s">
         <div style="flex:1;min-width:0">
@@ -2319,7 +2320,8 @@ function renderFields() {
            ● ${hs==='good'?'Good':hs==='optimal'?'Moderate':hs==='serious'?'Need Serious Attention':'Need Attention'}
          </span>`
       : '';
-    return `<div class="field-card" onclick="openPreview(${origIdx})">
+    const wantsZoom = (activeHealth==='attention' || activeHealth==='serious');
+    return `<div class="field-card" onclick="cameFromWatch=${wantsZoom};openPreview(${origIdx})">
       <div class="field-icon ${f.mapped?'mapped':'unmapped'}">
         <i class="ti ${f.mapped?'ti-map-pin-check':'ti-map-pin-exclamation'}"></i>
       </div>
@@ -2385,11 +2387,19 @@ function openPreview(idx) {
 }
 
 function openMapFromPreview() {
-  // Goes to the full overview map (all fields), not zoomed to this one --
-  // this field's own details/mosaic were already shown via the Preview
-  // screen itself, so View Map's job here is to let you browse and pick
-  // the NEXT field, not re-show the one you just looked at.
-  openMapView();
+  // Coming from Watch or a Need-Attention/Serious filtered list -- zoom
+  // straight to this specific problem field. Otherwise (general field
+  // list), show the full overview so the next field can be picked freely.
+  if(cameFromWatch){
+    const f   = fields[selectedIdx];
+    const geo = f ? getGeoByCode(f.code) : null;
+    openMapView(() => {
+      if(geo && geo.centroid && leafletMap) zoomToField(geo);
+      else if(leafletMap) leafletMap.setView([10.875, 78.855], 13);
+    });
+  } else {
+    openMapView();
+  }
 }
 
 let screenHistory = [];
