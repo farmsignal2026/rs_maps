@@ -2394,7 +2394,7 @@ function openMapFromPreview() {
     const f   = fields[selectedIdx];
     const geo = f ? getGeoByCode(f.code) : null;
     openMapView(() => {
-      if(geo && geo.centroid && leafletMap) zoomToField(geo);
+      if(geo && geo.centroid && leafletMap) zoomToField(geo, false);
       else if(leafletMap) leafletMap.setView([10.875, 78.855], 13);
     });
   } else {
@@ -3079,16 +3079,18 @@ function openMapView(onReady) {
   setTimeout(init, 100);
 }
 
-function zoomToField(geo) {
-  // Instantly jump to field at zoom 17, render canvas, open detail panel
+function zoomToField(geo, showPanel=true) {
+  // Instantly jump to field at zoom 17, render canvas, optionally open detail panel
   leafletMap.setView(geo.centroid, 17, { animate: false });
   updateZoomLayers(17);
-  // Give browser one frame to reposition canvas pane, then draw and open panel
+  // Give browser one frame to reposition canvas pane, then draw (and open panel if requested)
   requestAnimationFrame(() => {
     if(ndviCanvasLayer) ndviCanvasLayer._reset();
-    requestAnimationFrame(() => {
-      showFieldDetailPanel(geo);
-    });
+    if(showPanel){
+      requestAnimationFrame(() => {
+        showFieldDetailPanel(geo);
+      });
+    }
   });
 }
 
