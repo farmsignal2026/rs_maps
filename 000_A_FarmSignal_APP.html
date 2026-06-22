@@ -2364,7 +2364,7 @@ function openMapFromPreview() {
   const f   = fields[selectedIdx];
   const geo = f ? getGeoByCode(f.code) : null;
   openMapView(() => {
-    if(geo && leafletMap) zoomToField(geo);
+    if(geo && geo.centroid && leafletMap) zoomToField(geo);
     else if(leafletMap) leafletMap.setView([10.875, 78.855], 13);
   });
 }
@@ -2863,6 +2863,7 @@ function buildMapLayers(){
   fieldGeoData.forEach(item=>{
     const f = getFieldByCode(item.code);
     if(!f) return; // skip if field not in current user's scope
+    if(!item.centroid || !item.polygon) return; // no boundary -- can't place on map, but still exists in lists
     const h=getHealth(item.healthStatus);
     const hasNdvi = item.ndvi!==null && item.ndvi!==undefined;
     const ndviStr = hasNdvi ? item.ndvi.toFixed(2) : 'N/A';
@@ -2978,7 +2979,9 @@ function stopMyLocation(){
 
 function fitMapToLoadedFields(){
   if(!fieldDataLoaded || !leafletMap || !fieldGeoData.length) return;
-  const bounds=L.latLngBounds(fieldGeoData.map(g=>g.centroid));
+  const mapped=fieldGeoData.filter(g=>g.centroid);
+  if(!mapped.length) return;   // no plots have a boundary at all -- leave the default view
+  const bounds=L.latLngBounds(mapped.map(g=>g.centroid));
   leafletMap.fitBounds(bounds, {padding:[30,30], maxZoom:15});
 }
 
@@ -3059,7 +3062,7 @@ function openScoutMapView(code) {
 
   openMapView(() => {
     showScoutBanner(code);
-    if(geo && leafletMap) {
+    if(geo && geo.centroid && leafletMap) {
       zoomToField(geo);
     } else if(leafletMap && f) {
       leafletMap.setView([10.875, 78.855], 13);
@@ -3784,9 +3787,39 @@ function statusForNdvi(ndvi, stage){
 async function loadFieldDataFromGitHub(){
   if(fieldDataLoaded) return true;   // already loaded this session -- don't re-fetch every login
   try{
-    const geoResp=await fetch(GITHUB_GEOJSON_URL);
-    if(!geoResp.ok) throw new Error('GeoJSON fetch failed: HTTP '+geoResp.status);
-    const geo=await geoResp.json();
+    // GeoJSON is now OPTIONAL, supplementary boundary data only -- it no
+    // longer drives which plots exist (that's the NDVI trends file now,
+    // matching the desktop dashboard's architecture). A plot missing or
+    // malformed in the GeoJSON still fully exists everywhere else; it
+    // just won't have a boundary to show on the map.
+    let boundaryByPlotID={};
+    try{
+      const geoResp=await fetch(GITHUB_GEOJSON_URL);
+      if(geoResp.ok){
+        const geo=await geoResp.json();
+        (geo.features||[]).forEach(feat=>{
+          const props=feat.properties||{};
+          const pks=Object.keys(props);
+          const pk=pks.find(k=>/^plot.?no$/i.test(k)) || pks.find(k=>/plot/i.test(k)&&/no/i.test(k));
+          if(!pk) return;
+          const code=String(props[pk]).trim();
+          if(!code || !feat.geometry) return;
+          let coords=null;
+          if(feat.geometry.type==='Polygon') coords=feat.geometry.coordinates[0];
+          else if(feat.geometry.type==='MultiPolygon') coords=feat.geometry.coordinates[0][0];
+          if(!coords) return;
+          const polygon=coords.map(c=>[c[1],c[0]]);
+          const lat=polygon.reduce((s,p)=>s+p[0],0)/polygon.length;
+          const lng=polygon.reduce((s,p)=>s+p[1],0)/polygon.length;
+          boundaryByPlotID[code]={polygon, centroid:[lat,lng]};
+        });
+        console.log('Loaded boundaries for '+Object.keys(boundaryByPlotID).length+' plots from GeoJSON');
+      } else {
+        console.warn('GeoJSON not found (HTTP '+geoResp.status+') -- continuing without boundaries, plots will list but not map');
+      }
+    }catch(geoErr){
+      console.warn('GeoJSON failed to load (continuing without boundaries):', geoErr.message);
+    }
 
     // PNG zip is optional -- if it fails, still show plots, just without images
     let pngMap={};
@@ -3809,13 +3842,13 @@ async function loadFieldDataFromGitHub(){
       console.warn('PNG zip failed to load (continuing without images):', zipErr.message);
     }
 
-    // NDVI trends is optional too -- if it fails, plots still show with
-    // boundaries/images, just no NDVI number/stage/health (same graceful
-    // fallback as before this was added).
+    // NDVI trends now DRIVES the plot list (matching the desktop
+    // dashboard's architecture) -- required, not optional. If this fails,
+    // there's no plot list at all, so fail clearly rather than silently.
     let ndviByPlot={};   // {plotID: {history:[{date,ndvi,confidence}], latest, prev}}
-    try{
-      const ndviResp=await fetch(GITHUB_NDVI_URL);
-      if(ndviResp.ok){
+    const ndviResp=await fetch(GITHUB_NDVI_URL);
+    if(!ndviResp.ok) throw new Error('NDVI trends fetch failed: HTTP '+ndviResp.status);
+    {
         const wb=XLSX.read(await ndviResp.arrayBuffer(), {type:'array', cellDates:true});
         const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {raw:false, dateNF:'yyyy-mm-dd'});
         const byPlot={};
@@ -3848,12 +3881,8 @@ async function loadFieldDataFromGitHub(){
           ndviByPlot[pid]={history:hist, latest, prev};
         });
         console.log('Loaded NDVI history for '+Object.keys(ndviByPlot).length+' plots');
-      } else {
-        console.warn('NDVI trends file not found (HTTP '+ndviResp.status+') -- continuing without NDVI/stage data');
-      }
-    }catch(ndviErr){
-      console.warn('NDVI trends failed to load (continuing without NDVI/stage data):', ndviErr.message);
     }
+    if(!Object.keys(ndviByPlot).length) throw new Error('NDVI trends file loaded but no plot data could be parsed from it.');
 
     // Pixel Classification is optional too.
     let pixelByPlot={};   // {plotID: {good, optimal, attention}}
@@ -3894,6 +3923,7 @@ async function loadFieldDataFromGitHub(){
     // DOP property, if present, is only used as a fallback for any plot
     // missing from this file.
     let plantDateByPlot={};
+    let fieldDetailsMeta={};  // {plotID: {farmer,division,village,area,variety,plotType}}
     let fieldDetailsRaw={};   // {plotID: raw date cell value} -- every plot seen, parsed or not
     try{
       const fdResp=await fetch(GITHUB_FIELDDETAILS_URL);
@@ -3904,65 +3934,69 @@ async function loadFieldDataFromGitHub(){
           const cols=Object.keys(rows[0]);
           const plotKey=cols.find(k=>/^plot.?no\.?$/i.test(k)) || cols.find(k=>/plot/i.test(k)&&/no/i.test(k));
           const dateKey=cols.find(k=>/planting/i.test(k)&&/date/i.test(k));
-          if(plotKey && dateKey){
+          const farmerKey=cols.find(k=>/farmer.*nam/i.test(k))||cols.find(k=>/^farmer$/i.test(k));
+          const divKey=cols.find(k=>/^division/i.test(k));
+          const villKey=cols.find(k=>/^village/i.test(k));
+          const areaKey=cols.find(k=>/area/i.test(k)&&/ac/i.test(k));
+          const varietyKey=cols.find(k=>/^variety$/i.test(k));
+          const typeKey=cols.find(k=>/^plot.?type$/i.test(k));
+          if(plotKey){
             rows.forEach(row=>{
               const pid=String(row[plotKey]).trim();
               if(!pid) return;
-              fieldDetailsRaw[pid]=row[dateKey];
-              const d=parseFieldDetailsDate(row[dateKey]);
-              if(d) plantDateByPlot[pid]=d;
+              fieldDetailsMeta[pid]={
+                farmer: farmerKey?String(row[farmerKey]||'').trim():'',
+                division: divKey?String(row[divKey]||'').trim():'',
+                village: villKey?String(row[villKey]||'').trim():'',
+                area: areaKey?String(row[areaKey]||''):'',
+                variety: varietyKey?String(row[varietyKey]||'').trim():'',
+                plotType: typeKey?String(row[typeKey]||'').trim():''
+              };
+              if(dateKey){
+                fieldDetailsRaw[pid]=row[dateKey];
+                const d=parseFieldDetailsDate(row[dateKey]);
+                if(d) plantDateByPlot[pid]=d;
+              }
             });
           }
         }
-        console.log('Loaded planting dates for '+Object.keys(plantDateByPlot).length+' plots from Field Details');
+        console.log('Loaded Field Details metadata for '+Object.keys(fieldDetailsMeta).length+' plots, planting dates for '+Object.keys(plantDateByPlot).length);
       } else {
-        console.warn('Field Details file not found (HTTP '+fdResp.status+') -- falling back to GeoJSON DOP only');
+        console.warn('Field Details file not found (HTTP '+fdResp.status+')');
       }
     }catch(fdErr){
-      console.warn('Field Details failed to load (falling back to GeoJSON DOP only):', fdErr.message);
+      console.warn('Field Details failed to load:', fdErr.message);
     }
 
+    // The plot LIST itself is now driven by the NDVI trends file -- same
+    // architecture as the desktop dashboard. GeoJSON boundaries and Field
+    // Details metadata are both looked up per plot, but a plot missing
+    // from either one still exists (matching desktop's "393 Fields
+    // monitored" counting NDVI matches regardless of boundary/metadata
+    // completeness) -- it just won't have a map location, or will show
+    // placeholder metadata.
     const newFields=[], newGeo=[];
-    let diagNoNdviMatch=0, diagNoPlantDate=0, diagBothOk=0;
+    let diagNoNdviMatch=0, diagNoPlantDate=0, diagBothOk=0, diagNoBoundary=0;
     let diagNoPlantDateExamples=[];
-    (geo.features||[]).forEach(feat=>{
-      const props=feat.properties||{};
-      const pks=Object.keys(props);
-      const pk=pks.find(k=>/^plot.?no$/i.test(k)) || pks.find(k=>/plot/i.test(k)&&/no/i.test(k));
-      if(!pk) return;
-      const code=String(props[pk]).trim();
-      if(!code || !feat.geometry) return;
+    const plotIDs=Object.keys(ndviByPlot);
 
-      let coords=null;
-      if(feat.geometry.type==='Polygon') coords=feat.geometry.coordinates[0];
-      else if(feat.geometry.type==='MultiPolygon') coords=feat.geometry.coordinates[0][0];
-      if(!coords) return;
-      const polygon=coords.map(c=>[c[1],c[0]]);   // GeoJSON [lng,lat] -> Leaflet [lat,lng]
-      const lat=polygon.reduce((s,p)=>s+p[0],0)/polygon.length;
-      const lng=polygon.reduce((s,p)=>s+p[1],0)/polygon.length;
-
-      const farmerKey=pks.find(k=>/farmer.*nam/i.test(k))||pks.find(k=>/^farmer$/i.test(k));
-      const divKey=pks.find(k=>/^division/i.test(k));
-      const villKey=pks.find(k=>/^village/i.test(k));
-      const varietyKey=pks.find(k=>/variety/i.test(k));
-      const typeKey=pks.find(k=>/plot.?type/i.test(k));
-      const areaKey=pks.find(k=>/area/i.test(k)&&/ac/i.test(k));
-      const dopKey=pks.find(k=>/^dop$/i.test(k)) || pks.find(k=>/plant/i.test(k)&&/date/i.test(k));
+    plotIDs.forEach(code=>{
+      const fdMeta=fieldDetailsMeta[code];
+      const boundary=boundaryByPlotID[code];   // may be undefined -- boundary is optional now
+      if(!boundary) diagNoBoundary++;
 
       newFields.push({
-        name: farmerKey?String(props[farmerKey]).trim():'Unknown farmer',
-        code, factory:'', division: divKey?String(props[divKey]).trim():'',
-        section:'', village: villKey?String(props[villKey]).trim():'',
-        area: areaKey?String(props[areaKey]):'', variety: varietyKey?String(props[varietyKey]):'',
-        type: typeKey?String(props[typeKey]):'', date:'', soil:'', phone:'',
-        mapped:true, healthStatus:'unknown'
+        name: fdMeta&&fdMeta.farmer ? fdMeta.farmer : 'Unknown farmer',
+        code, factory:'', division: fdMeta?fdMeta.division:'',
+        section:'', village: fdMeta?fdMeta.village:'',
+        area: fdMeta?fdMeta.area:'', variety: fdMeta?fdMeta.variety:'',
+        type: fdMeta?fdMeta.plotType:'', date:'', soil:'', phone:'',
+        mapped: !!boundary,   // "View Map" only shows if we actually have a boundary
+        healthStatus:'unknown'
       });
 
-      // Compute real NDVI/stage/health/pixel data when available; fall
-      // back to the 'unknown' placeholders for any plot missing a
-      // planting date or NDVI history -- never guess.
       const ndviInfo=ndviByPlot[code];
-      const plantDate=plantDateByPlot[code] || (dopKey?parseDOP(props[dopKey]):null);
+      const plantDate=plantDateByPlot[code]||null;
       if(ndviInfo && plantDate) diagBothOk++;
       else if(!ndviInfo) diagNoNdviMatch++;
       else if(!plantDate){
@@ -3971,13 +4005,15 @@ async function loadFieldDataFromGitHub(){
           const inFD = code in fieldDetailsRaw;
           diagNoPlantDateExamples.push(
             code+' ('+(inFD ? 'in Field Details but unparseable -- raw value: '+JSON.stringify(fieldDetailsRaw[code])
-                             : 'NOT in Field Details')
-            +'; GeoJSON DOP: '+(dopKey?JSON.stringify(props[dopKey]):'no DOP property')+')'
+                             : 'NOT in Field Details')+')'
           );
         }
       }
+
       let geoEntry={
-        code, centroid:[lat,lng], polygon,
+        code,
+        centroid: boundary ? boundary.centroid : null,
+        polygon: boundary ? boundary.polygon : null,
         ndvi:null, prevNdvi:undefined, prevDate:'',
         healthStatus:'unknown', growthStage:'Unknown', growthDays:null,
         thresholdMin:null, thresholdMax:null,
@@ -4003,10 +4039,6 @@ async function loadFieldDataFromGitHub(){
             geoEntry.prevNdvi=ndviInfo.prev.ndvi;
             geoEntry.prevDate=ndviInfo.prev.date.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
           }
-          // Stage timeline -- for each of the 5 stages, find this plot's
-          // latest historical reading that fell within that stage's day
-          // range; mark the current stage; stages not yet reached are
-          // 'future' with no NDVI value (never guessed).
           geoEntry.stageData=STAGES.map((s,i)=>{
             const dMin = i===0 ? 0 : STAGES[i-1].cumEnd;
             const dMax = s.cumEnd;
@@ -4017,40 +4049,37 @@ async function loadFieldDataFromGitHub(){
               const a=Math.round((h.date-plantDate)/86400000);
               if(a>=dMin && a<=dMax) lastInStage=h;
             });
-            if(i===sf.idx){
-              return {ndvi:ndviInfo.latest.ndvi, status, current:true};
-            }
+            if(i===sf.idx) return {ndvi:ndviInfo.latest.ndvi, status, current:true};
             if(lastInStage) return {ndvi:lastInStage.ndvi, status:statusForNdvi(lastInStage.ndvi, s)};
             return {ndvi:null, status:'future'};
           });
-          // Update the field-level health badge too (used in list/preview)
           newFields[newFields.length-1].healthStatus=status;
         }
       }
       newGeo.push(geoEntry);
     });
 
-    if(!newFields.length) throw new Error('GeoJSON had no recognizable plot-number property on any feature.');
+    if(!newFields.length) throw new Error('NDVI trends file had no recognizable plot data.');
 
     ALL_FIELDS=newFields;
     fieldGeoData=newGeo;
     fieldDataLoaded=true;
     const withNdvi=newGeo.filter(g=>g.ndvi!==null).length;
-    console.log('Loaded '+newFields.length+' plots from GitHub, '+Object.keys(pngMap).length+' with mosaic images, '+withNdvi+' with real NDVI/stage data');
+    console.log('Loaded '+newFields.length+' plots (driven by NDVI trends), '+Object.keys(pngMap).length+' with mosaic images, '+withNdvi+' with real NDVI/stage data, '+diagNoBoundary+' with no boundary (won\'t appear on map)');
     console.log('Diagnostic -- both OK: '+diagBothOk+', no NDVI match: '+diagNoNdviMatch+', no plant date: '+diagNoPlantDate);
-    if(diagNoNdviMatch>0 || diagNoPlantDate>0){
+    if(diagNoNdviMatch>0 || diagNoPlantDate>0 || diagNoBoundary>0){
       setTimeout(()=>alert(
-        'Field data loaded -- '+newFields.length+' plots total.\n\n'
+        'Field data loaded -- '+newFields.length+' plots total (matches NDVI trends file).\n\n'
         +'Got full real data: '+diagBothOk+'\n'
-        +'Missing (no NDVI match for that plot number): '+diagNoNdviMatch+'\n'
-        +'Missing (no usable planting date from either source): '+diagNoPlantDate
-        +(diagNoPlantDateExamples.length ? '\n\nExamples:\n'+diagNoPlantDateExamples.join('\n') : '')
+        +'Missing (no usable planting date): '+diagNoPlantDate+'\n'
+        +'No boundary -- won\'t appear on map, but will appear in lists: '+diagNoBoundary
+        +(diagNoPlantDateExamples.length ? '\n\nPlanting-date examples:\n'+diagNoPlantDateExamples.join('\n') : '')
       ), 600);
     }
     return true;
   }catch(err){
     console.error('loadFieldDataFromGitHub failed:', err);
-    alert('Could not load field data from GitHub:\n\n'+err.message+'\n\nContinuing with sample data instead -- check the GITHUB_GEOJSON_URL/GITHUB_ZIP_URL constants and your phone\'s data connection.');
+    alert('Could not load field data from GitHub:\n\n'+err.message+'\n\nContinuing with sample data instead -- check the GitHub URL constants and your phone\'s data connection.');
     return false;
   }
 }
