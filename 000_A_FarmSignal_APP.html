@@ -1987,7 +1987,7 @@ function ndviToRGB(v){
 }
 
 // Supabase field NDVI data — healthStatus & pixelDist computed server-side
-const WATCH_THRESHOLD = 0.05; // NDVI drop that triggers WATCH alert
+const WATCH_THRESHOLD = 0.10; // NDVI drop that triggers WATCH alert -- matches web dashboard
 
 let fieldGeoData = [
   {
@@ -2151,7 +2151,7 @@ function renderWatchBanner() {
         <span style="background:#a07800;color:#fff;font-size:9px;font-weight:700;
           padding:2px 6px;border-radius:10px">${watchFields.length} fields</span>
       </span>
-      <span style="font-size:9px;color:#a07800">≥ 0.05 drop · ${watchFields[0]?.prevDate} → 08 May</span>
+      <span style="font-size:9px;color:#a07800">&ge; ${WATCH_THRESHOLD.toFixed(2)} drop · ${watchFields[0]?.prevDate} &rarr; ${watchFields[0]?.lastFetch}</span>
     </div>
     ${watchFields.map(w => `
       <div onclick="openPreview(${fields.indexOf(w.field)})" style="display:flex;align-items:center;justify-content:space-between;
