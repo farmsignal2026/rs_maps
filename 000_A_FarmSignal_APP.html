@@ -2368,7 +2368,7 @@ function openPreview(idx) {
     document.getElementById('pv-health-badge').textContent = '● ' + h.label;
     document.getElementById('pv-health-badge').style.cssText =
       `font-size:11px;font-weight:700;padding:3px 10px;border-radius:6px;background:${h.bg};color:${h.color};border:1px solid ${h.border}`;
-    document.getElementById('pv-ndvi-val').textContent = 'NDVI · ' + (fieldGeoData.find(g=>g.idx===idx)?.ndvi?.toFixed(2) || '–');
+    document.getElementById('pv-ndvi-val').textContent = 'NDVI · ' + (getGeoByCode(f.code)?.ndvi?.toFixed(2) ?? '–');
   } else {
     healthRow.style.display = 'none';
   }
@@ -2385,12 +2385,11 @@ function openPreview(idx) {
 }
 
 function openMapFromPreview() {
-  const f   = fields[selectedIdx];
-  const geo = f ? getGeoByCode(f.code) : null;
-  openMapView(() => {
-    if(geo && geo.centroid && leafletMap) zoomToField(geo);
-    else if(leafletMap) leafletMap.setView([10.875, 78.855], 13);
-  });
+  // Goes to the full overview map (all fields), not zoomed to this one --
+  // this field's own details/mosaic were already shown via the Preview
+  // screen itself, so View Map's job here is to let you browse and pick
+  // the NEXT field, not re-show the one you just looked at.
+  openMapView();
 }
 
 let screenHistory = [];
@@ -3963,6 +3962,7 @@ async function loadFieldDataFromGitHub(){
           const areaKey=cols.find(k=>/area/i.test(k)&&/ac/i.test(k));
           const varietyKey=cols.find(k=>/^variety$/i.test(k));
           const typeKey=cols.find(k=>/^plot.?type$/i.test(k));
+          const soilKey=cols.find(k=>/^soil.?type$/i.test(k))||cols.find(k=>/soil/i.test(k));
           if(plotKey){
             rows.forEach(row=>{
               const pid=String(row[plotKey]).trim();
@@ -3973,7 +3973,8 @@ async function loadFieldDataFromGitHub(){
                 village: villKey?String(row[villKey]||'').trim():'',
                 area: areaKey?String(row[areaKey]||''):'',
                 variety: varietyKey?String(row[varietyKey]||'').trim():'',
-                plotType: typeKey?String(row[typeKey]||'').trim():''
+                plotType: typeKey?String(row[typeKey]||'').trim():'',
+                soilType: soilKey?String(row[soilKey]||'').trim():''
               };
               if(dateKey){
                 fieldDetailsRaw[pid]=row[dateKey];
@@ -4013,13 +4014,14 @@ async function loadFieldDataFromGitHub(){
         code, factory:'', division: fdMeta?fdMeta.division:'',
         section:'', village: fdMeta?fdMeta.village:'',
         area: fdMeta?fdMeta.area:'', variety: fdMeta?fdMeta.variety:'',
-        type: fdMeta?fdMeta.plotType:'', date:'', soil:'', phone:'',
+        type: fdMeta?fdMeta.plotType:'', date:'', soil: fdMeta?fdMeta.soilType:'', phone:'',
         mapped: !!boundary,   // "View Map" only shows if we actually have a boundary
         healthStatus:'unknown'
       });
 
       const ndviInfo=ndviByPlot[code];
       const plantDate=plantDateByPlot[code]||null;
+      if(plantDate) newFields[newFields.length-1].date=plantDate.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
       if(ndviInfo && plantDate) diagBothOk++;
       else if(!ndviInfo) diagNoNdviMatch++;
       else if(!plantDate){
