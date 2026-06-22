@@ -3719,18 +3719,13 @@ let fieldDataLoaded=false;
 // plain ISO/locale date string, or an Excel serial number (in case it
 // comes through as a number rather than a formatted string).
 // Field Details' planting date comes through SheetJS in a DIFFERENT
-// convention than the GeoJSON's DOP (M/D/YY, American-style, already
-// proven correct against this exact file earlier this session on the
-// desktop dashboard) -- deliberately NOT using parseDOP's DD-MM-YYYY
-// reinterpretation here, since that's specific to the GeoJSON's format.
+// Field Details' planting date turns out to use the same DD/MM/YYYY
+// convention as the GeoJSON's DOP (confirmed directly from the
+// diagnostic's raw values -- "26/02/2026" etc -- not the M/D/YY format
+// assumed earlier this session, which applied to a different extraction
+// path on the desktop dashboard). Just delegates to parseDOP.
 function parseFieldDetailsDate(val){
-  if(val===null || val===undefined || val==='') return null;
-  if(typeof val==='number'){
-    const ms=Math.round((val-25569)*86400*1000);
-    return new Date(ms);
-  }
-  const d=new Date(String(val).trim());
-  return isNaN(d.getTime()) ? null : d;
+  return parseDOP(val);
 }
 
 function parseDOP(val){
