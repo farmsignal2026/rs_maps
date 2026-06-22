@@ -3012,6 +3012,10 @@ function fitMapToLoadedFields(){
 function openMapView(onReady) {
   goTo('s-map');
   hideScoutBanner();
+  closeDetailPanel();   // always start clean -- a stale open panel from a
+                         // previous field shouldn't persist when reopening
+                         // the map, whether via the general map icon or
+                         // a fresh per-field zoom request
   const mappedCount = fields.filter(f=>f.mapped).length;
   const attentionCount = fields.filter(f=>f.mapped && (f.healthStatus==='attention'||f.healthStatus==='serious')).length;
   document.getElementById('map-field-count').textContent = mappedCount;
