@@ -407,7 +407,7 @@ body {
           </span>
           <span style="font-size:9px;color:#888780">Sentinel-2 · 08 May 2026</span>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px" id="health-summary-row">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:5px" id="health-summary-row">
           <!-- rendered by JS -->
         </div>
         <!-- Stacked health bar -->
@@ -731,16 +731,19 @@ body {
     </div>
 
     <!-- Horizontal legend strip below app-bar -->
-    <div style="background:rgba(39,80,10,0.9);padding:5px 12px;display:flex;align-items:center;gap:12px;flex-shrink:0">
+    <div style="background:rgba(39,80,10,0.9);padding:5px 12px;display:flex;align-items:center;gap:10px;flex-shrink:0;flex-wrap:wrap">
       <span style="font-size:9px;font-weight:600;color:#9FE1CB;text-transform:uppercase;letter-spacing:0.05em">Crop Health:</span>
       <span style="display:flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:#6ee07a">
-        <span style="width:10px;height:10px;border-radius:2px;background:#2ea84a;border:1px solid #145c22;display:inline-block"></span>Good
+        <span style="width:10px;height:10px;border-radius:2px;background:#22a65a;border:1px solid #15803d;display:inline-block"></span>Good
       </span>
-      <span style="display:flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:#b8e07a">
-        <span style="width:10px;height:10px;border-radius:2px;background:#7dcf3a;border:1px solid #447f16;display:inline-block"></span>Optimal
+      <span style="display:flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:#ffd685">
+        <span style="width:10px;height:10px;border-radius:2px;background:#f59e0b;border:1px solid #b45309;display:inline-block"></span>Moderate
       </span>
-      <span style="display:flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:#f5c4a0">
-        <span style="width:10px;height:10px;border-radius:2px;background:#f07c2a;border:1px solid #994800;display:inline-block"></span>Need Attention
+      <span style="display:flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:#ff9d9d">
+        <span style="width:10px;height:10px;border-radius:2px;background:#dc2626;border:1px solid #b91c1c;display:inline-block"></span>Need Attention
+      </span>
+      <span style="display:flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:#e8a5a5">
+        <span style="width:10px;height:10px;border-radius:2px;background:#7f1d1d;border:1px solid #5c1414;display:inline-block"></span>Serious
       </span>
       <span style="margin-left:auto;font-size:9px;color:#9FE1CB;opacity:0.7">Growth-stage aware</span>
     </div>
@@ -1943,12 +1946,33 @@ let photosCaptured = [false,false,false,false,false];
 
 // Health status → color map. Thresholds live in Supabase, not here.
 const HEALTH = {
-  good:      { label:'Good',           color:'#1a7a2e', fill:'#2ea84a', border:'#145c22', bg:'#d4f4dc' },
-  optimal:   { label:'Optimal',        color:'#5aaa1e', fill:'#7dcf3a', border:'#447f16', bg:'#e8f8d0' },
-  attention: { label:'Need Attention',  color:'#c95f00', fill:'#f07c2a', border:'#994800', bg:'#fde8d0' },
-  unknown:   { label:'No NDVI data',    color:'#6b6b66', fill:'#b8b6ac', border:'#888780', bg:'#ECEAE2' }
+  good:      { label:'Good',                   color:'#15803d', fill:'#22a65a', border:'#15803d', bg:'#dcf5e3' },
+  optimal:   { label:'Moderate',                color:'#b45309', fill:'#f59e0b', border:'#b45309', bg:'#fef3d9' },
+  attention: { label:'Need Attention',          color:'#b91c1c', fill:'#dc2626', border:'#b91c1c', bg:'#fde2e2' },
+  serious:   { label:'Need Serious Attention',  color:'#7f1d1d', fill:'#7f1d1d', border:'#7f1d1d', bg:'#f3dede' },
+  unknown:   { label:'No NDVI data',            color:'#6b6b66', fill:'#b8b6ac', border:'#888780', bg:'#ECEAE2' }
 };
 function getHealth(s){ return HEALTH[s]||HEALTH.unknown; }
+
+// How many consecutive CONFIRMED observations a field has been in
+// "Need attention", walking back from its latest reading. Same threshold
+// and logic as the desktop dashboard's persistence tracking -- 1-2 stays
+// "Need Attention", 3+ becomes "Need Serious Attention".
+const SERIOUS_STREAK_THRESHOLD=3;
+function computeAttentionStreak(history, plantDate){
+  let streak=0;
+  for(let i=history.length-1;i>=0;i--){
+    const h=history[i];
+    if(h.confidence==='low') continue;
+    const age=Math.round((h.date-plantDate)/86400000);
+    const sf=stageForAge(age);
+    if(!sf) break;
+    const status=statusForNdvi(h.ndvi, sf.stage);
+    if(status==='attention') streak++;
+    else break;
+  }
+  return streak;
+}
 
 // NDVI → RGB colormap (orange → yellow-green → dark green)
 function ndviToRGB(v){
@@ -2155,20 +2179,22 @@ function renderHealthSummary(){
   // Counts from mapped fields with healthStatus — same source the filter uses
   const mapped = fields.filter(f=>f.mapped);
   const indexed = mapped.filter(f=>f.healthStatus);
-  const counts = { good:0, optimal:0, attention:0 };
+  const counts = { good:0, optimal:0, attention:0, serious:0 };
   indexed.forEach(f => { if(counts[f.healthStatus]!==undefined) counts[f.healthStatus]++; });
-  const total = counts.good + counts.optimal + counts.attention;
+  const total = counts.good + counts.optimal + counts.attention + counts.serious;
 
   const items = [
     { key:'good',      label:'Good',          count:counts.good,
-      numColor:'#1a7a2e', bg:'#d4f4dc', border:'#9fd8ae' },
-    { key:'optimal',   label:'Optimal',       count:counts.optimal,
-      numColor:'#447f16', bg:'#e8f8d0', border:'#b8e07a' },
+      numColor:HEALTH.good.color, bg:HEALTH.good.bg, border:HEALTH.good.border },
+    { key:'optimal',   label:'Moderate',      count:counts.optimal,
+      numColor:HEALTH.optimal.color, bg:HEALTH.optimal.bg, border:HEALTH.optimal.border },
     { key:'attention', label:'Need Attention', count:counts.attention,
-      numColor:'#994800', bg:'#fde8d0', border:'#f5c4a0' }
+      numColor:HEALTH.attention.color, bg:HEALTH.attention.bg, border:HEALTH.attention.border },
+    { key:'serious',   label:'Serious',       count:counts.serious,
+      numColor:HEALTH.serious.color, bg:HEALTH.serious.bg, border:HEALTH.serious.border }
   ];
 
-  // Three mini cards
+  // Four mini cards
   document.getElementById('health-summary-row').innerHTML = items.map(it=>`
     <div id="hcard-${it.key}"
       style="background:${it.bg};border:1px solid ${it.border};border-radius:9px;
@@ -2180,9 +2206,7 @@ function renderHealthSummary(){
 
   // Stacked bar
   document.getElementById('health-summary-bar').innerHTML = items.map(it=>`
-    <div style="width:${total?((it.count/total)*100).toFixed(1):0}%;background:${
-      it.key==='good'?'#2ea84a':it.key==='optimal'?'#7dcf3a':'#f07c2a'
-    };transition:width 0.4s"></div>`).join('');
+    <div style="width:${total?((it.count/total)*100).toFixed(1):0}%;background:${HEALTH[it.key].fill};transition:width 0.4s"></div>`).join('');
 
   const lbl = document.getElementById('health-indexed-lbl');
   if(lbl) lbl.textContent = indexed.length + ' of ' + mapped.length + ' mapped fields indexed';
@@ -2218,14 +2242,14 @@ function filterByHealth(status) {
       document.getElementById('card-'+t).style.boxShadow = '';
     });
     updateHealthCardHighlight(status);
-    const labels = {good:'Good Health Fields', optimal:'Optimal Health Fields', attention:'Need Attention Fields'};
+    const labels = {good:'Good Health Fields', optimal:'Moderate Health Fields', attention:'Need Attention Fields', serious:'Need Serious Attention Fields'};
     document.getElementById('list-label').textContent = labels[status];
   }
   renderFields();
 }
 
 function updateHealthCardHighlight(status) {
-  ['good','optimal','attention'].forEach(k => {
+  ['good','optimal','attention','serious'].forEach(k => {
     const el = document.getElementById('hcard-'+k);
     if(!el) return;
     el.style.outline = k===status ? '2.5px solid #444441' : 'none';
@@ -2292,7 +2316,7 @@ function renderFields() {
            background:${hs==='good'?'#d4f4dc':hs==='optimal'?'#e8f8d0':'#fde8d0'};
            color:${hs==='good'?'#1a7a2e':hs==='optimal'?'#447f16':'#994800'};
            border:1px solid ${hs==='good'?'#9fd8ae':hs==='optimal'?'#b8e07a':'#f5c4a0'}">
-           ● ${hs==='good'?'Good':hs==='optimal'?'Optimal':'Need Attention'}
+           ● ${hs==='good'?'Good':hs==='optimal'?'Moderate':hs==='serious'?'Need Serious Attention':'Need Attention'}
          </span>`
       : '';
     return `<div class="field-card" onclick="openPreview(${origIdx})">
@@ -2602,13 +2626,13 @@ const STAGES=[
 const TOTAL_DAYS=360;
 
 function stageColor(status){
-  return status==='good'?'#2ea84a':status==='optimal'?'#7dcf3a':status==='attention'?'#f07c2a':'#D3D1C7';
+  return status==='good'?'#22a65a':status==='optimal'?'#f59e0b':status==='attention'?'#dc2626':status==='serious'?'#7f1d1d':'#D3D1C7';
 }
 function stageBorder(status){
-  return status==='good'?'#145c22':status==='optimal'?'#447f16':status==='attention'?'#994800':'#B4B2A9';
+  return status==='good'?'#15803d':status==='optimal'?'#b45309':status==='attention'?'#b91c1c':status==='serious'?'#5c1414':'#B4B2A9';
 }
 function stageTextColor(status){
-  return status==='good'?'#0d3d17':status==='optimal'?'#2d5510':status==='attention'?'#7a3a00':'#888780';
+  return status==='good'?'#0d3d17':status==='optimal'?'#7c4a08':status==='attention'?'#7a1414':status==='serious'?'#3d0c0c':'#888780';
 }
 
 function renderStageTimeline(item){
@@ -2748,7 +2772,7 @@ function showFieldDetailPanel(geoItem){
   // Show scout button for ANY Need Attention field — not just when in scout mode
   const dpScout = document.getElementById('dp-scout-btn');
   if(dpScout) {
-    const isAttention = geoItem.healthStatus === 'attention';
+    const isAttention = geoItem.healthStatus === 'attention' || geoItem.healthStatus === 'serious';
     const targetCode  = pendingScoutIdx || geoItem.code; // use pending or this field's code
     if(isAttention) {
       dpScout.style.display = 'flex';
@@ -2989,7 +3013,7 @@ function openMapView(onReady) {
   goTo('s-map');
   hideScoutBanner();
   const mappedCount = fields.filter(f=>f.mapped).length;
-  const attentionCount = fields.filter(f=>f.mapped && f.healthStatus==='attention').length;
+  const attentionCount = fields.filter(f=>f.mapped && (f.healthStatus==='attention'||f.healthStatus==='serious')).length;
   document.getElementById('map-field-count').textContent = mappedCount;
 
   // Show/hide attention badge
@@ -4022,7 +4046,11 @@ async function loadFieldDataFromGitHub(){
         const age=Math.round((ndviInfo.latest.date-plantDate)/86400000);
         const sf=stageForAge(age);
         if(sf){
-          const status=statusForNdvi(ndviInfo.latest.ndvi, sf.stage);
+          let status=statusForNdvi(ndviInfo.latest.ndvi, sf.stage);
+          if(status==='attention'){
+            const streak=computeAttentionStreak(ndviInfo.history, plantDate);
+            if(streak>=SERIOUS_STREAK_THRESHOLD) status='serious';
+          }
           geoEntry.ndvi=ndviInfo.latest.ndvi;
           geoEntry.healthStatus=status;
           geoEntry.growthStage=sf.stage.name;
@@ -5608,10 +5636,10 @@ function renderFactoryDash() {
 
   // Health bar
   document.getElementById('factory-health-bar').innerHTML = [
-    {n:totalGood,color:'#2ea84a'},{n:totalOptimal,color:'#7dcf3a'},{n:totalAttention,color:'#f07c2a'}
+    {n:totalGood,color:HEALTH.good.fill},{n:totalOptimal,color:HEALTH.optimal.fill},{n:totalAttention,color:HEALTH.attention.fill}
   ].map(x=>`<div style="width:${(x.n/totalIndexed*100).toFixed(1)}%;background:${x.color}"></div>`).join('');
   document.getElementById('factory-health-legend').innerHTML = [
-    {l:'Good',n:totalGood,col:'#1a7a2e'},{l:'Optimal',n:totalOptimal,col:'#447f16'},{l:'Need Attention',n:totalAttention,col:'#994800'}
+    {l:'Good',n:totalGood,col:HEALTH.good.color},{l:'Moderate',n:totalOptimal,col:HEALTH.optimal.color},{l:'Need Attention',n:totalAttention,col:HEALTH.attention.color}
   ].map(x=>`<span style="color:${x.col};font-weight:600">${x.n} ${x.l}</span>`).join('');
 
   // Scout bar
