@@ -2389,19 +2389,15 @@ function openPreview(idx) {
 }
 
 function openMapFromPreview() {
-  // Coming from Watch or a Need-Attention/Serious filtered list -- zoom
-  // straight to this specific problem field. Otherwise (general field
-  // list), show the full overview so the next field can be picked freely.
-  if(cameFromWatch){
-    const f   = fields[selectedIdx];
-    const geo = f ? getGeoByCode(f.code) : null;
-    openMapView(() => {
-      if(geo && geo.centroid && leafletMap) zoomToField(geo, false);
-      else if(leafletMap) leafletMap.setView([10.875, 78.855], 13);
-    });
-  } else {
-    openMapView();
-  }
+  // Always zooms to this specific field -- whatever list it was selected
+  // from. The full overview is reached separately, via the top map icon,
+  // which has no specific field context to zoom to.
+  const f   = fields[selectedIdx];
+  const geo = f ? getGeoByCode(f.code) : null;
+  openMapView(() => {
+    if(geo && geo.centroid && leafletMap) zoomToField(geo, false);
+    else if(leafletMap) leafletMap.setView([10.875, 78.855], 13);
+  });
 }
 
 let screenHistory = [];
