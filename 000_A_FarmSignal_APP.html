@@ -3876,13 +3876,14 @@ async function loadFieldDataFromGitHub(){
       console.warn('PNG zip failed to load (continuing without images):', zipErr.message);
     }
 
-    // NDVI trends now DRIVES the plot list (matching the desktop
-    // dashboard's architecture) -- required, not optional. If this fails,
-    // there's no plot list at all, so fail clearly rather than silently.
+    // NDVI trends is supplementary -- it can only ever cover plots that
+    // already have a boundary (satellite extraction needs a polygon to
+    // sample pixels from), so it's never the true universe of plots that
+    // SHOULD exist. Field Details (below) is now the real plot list.
     let ndviByPlot={};   // {plotID: {history:[{date,ndvi,confidence}], latest, prev}}
-    const ndviResp=await fetch(GITHUB_NDVI_URL);
-    if(!ndviResp.ok) throw new Error('NDVI trends fetch failed: HTTP '+ndviResp.status);
-    {
+    try{
+      const ndviResp=await fetch(GITHUB_NDVI_URL);
+      if(ndviResp.ok){
         const wb=XLSX.read(await ndviResp.arrayBuffer(), {type:'array', cellDates:true});
         const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {raw:false, dateNF:'yyyy-mm-dd'});
         const byPlot={};
@@ -3915,8 +3916,12 @@ async function loadFieldDataFromGitHub(){
           ndviByPlot[pid]={history:hist, latest, prev};
         });
         console.log('Loaded NDVI history for '+Object.keys(ndviByPlot).length+' plots');
+      } else {
+        console.warn('NDVI trends file not found (HTTP '+ndviResp.status+') -- continuing without NDVI/stage data');
+      }
+    }catch(ndviErr){
+      console.warn('NDVI trends failed to load (continuing without NDVI/stage data):', ndviErr.message);
     }
-    if(!Object.keys(ndviByPlot).length) throw new Error('NDVI trends file loaded but no plot data could be parsed from it.');
 
     // Pixel Classification is optional too.
     let pixelByPlot={};   // {plotID: {good, optimal, attention}}
@@ -3959,9 +3964,9 @@ async function loadFieldDataFromGitHub(){
     let plantDateByPlot={};
     let fieldDetailsMeta={};  // {plotID: {farmer,division,village,area,variety,plotType}}
     let fieldDetailsRaw={};   // {plotID: raw date cell value} -- every plot seen, parsed or not
-    try{
-      const fdResp=await fetch(GITHUB_FIELDDETAILS_URL);
-      if(fdResp.ok){
+    const fdResp=await fetch(GITHUB_FIELDDETAILS_URL);
+    if(!fdResp.ok) throw new Error('Field Details fetch failed: HTTP '+fdResp.status);
+    {
         const wb=XLSX.read(await fdResp.arrayBuffer(), {type:'array', cellDates:true});
         const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {raw:false, dateNF:'yyyy-mm-dd'});
         if(rows.length){
@@ -3997,24 +4002,17 @@ async function loadFieldDataFromGitHub(){
           }
         }
         console.log('Loaded Field Details metadata for '+Object.keys(fieldDetailsMeta).length+' plots, planting dates for '+Object.keys(plantDateByPlot).length);
-      } else {
-        console.warn('Field Details file not found (HTTP '+fdResp.status+')');
-      }
-    }catch(fdErr){
-      console.warn('Field Details failed to load:', fdErr.message);
     }
+    if(!Object.keys(fieldDetailsMeta).length) throw new Error('Field Details file loaded but no plot data could be parsed from it.');
 
-    // The plot LIST itself is now driven by the NDVI trends file -- same
-    // architecture as the desktop dashboard. GeoJSON boundaries and Field
-    // Details metadata are both looked up per plot, but a plot missing
-    // from either one still exists (matching desktop's "393 Fields
-    // monitored" counting NDVI matches regardless of boundary/metadata
-    // completeness) -- it just won't have a map location, or will show
-    // placeholder metadata.
+    // Field Details is now the true plot universe (e.g. 433 per Tab 2) --
+    // NDVI history and GeoJSON boundaries are both looked up per plot,
+    // but a plot missing either is a normal, expected category now (the
+    // genuinely unmapped/unprocessed ones), not a problem to flag.
     const newFields=[], newGeo=[];
     let diagNoNdviMatch=0, diagNoPlantDate=0, diagBothOk=0, diagNoBoundary=0;
     let diagNoPlantDateExamples=[];
-    const plotIDs=Object.keys(ndviByPlot);
+    const plotIDs=Object.keys(fieldDetailsMeta);
 
     plotIDs.forEach(code=>{
       const fdMeta=fieldDetailsMeta[code];
@@ -4100,20 +4098,24 @@ async function loadFieldDataFromGitHub(){
       newGeo.push(geoEntry);
     });
 
-    if(!newFields.length) throw new Error('NDVI trends file had no recognizable plot data.');
+    if(!newFields.length) throw new Error('Field Details file had no recognizable plot data.');
 
     ALL_FIELDS=newFields;
     fieldGeoData=newGeo;
     fieldDataLoaded=true;
     const withNdvi=newGeo.filter(g=>g.ndvi!==null).length;
-    console.log('Loaded '+newFields.length+' plots (driven by NDVI trends), '+Object.keys(pngMap).length+' with mosaic images, '+withNdvi+' with real NDVI/stage data, '+diagNoBoundary+' with no boundary (won\'t appear on map)');
-    console.log('Diagnostic -- both OK: '+diagBothOk+', no NDVI match: '+diagNoNdviMatch+', no plant date: '+diagNoPlantDate);
-    if(diagNoNdviMatch>0 || diagNoPlantDate>0 || diagNoBoundary>0){
+    console.log('Loaded '+newFields.length+' plots (driven by Field Details), '+diagNoBoundary+' not yet mapped, '+withNdvi+' with real NDVI/stage data, '+Object.keys(pngMap).length+' with mosaic images');
+    console.log('Diagnostic -- full real data: '+diagBothOk+', not yet mapped/processed: '+diagNoNdviMatch+', no plant date: '+diagNoPlantDate);
+    // Only the genuine planting-date problem is worth a popup now --
+    // "not yet mapped" is an expected, normal category (the real gap
+    // between Field Details' full universe and what's been geotagged),
+    // not something to alert about every time.
+    if(diagNoPlantDate>0){
       setTimeout(()=>alert(
-        'Field data loaded -- '+newFields.length+' plots total (matches NDVI trends file).\n\n'
-        +'Got full real data: '+diagBothOk+'\n'
-        +'Missing (no usable planting date): '+diagNoPlantDate+'\n'
-        +'No boundary -- won\'t appear on map, but will appear in lists: '+diagNoBoundary
+        'Field data loaded -- '+newFields.length+' plots total (Field Details).\n\n'
+        +'Mapped & fully indexed: '+diagBothOk+'\n'
+        +'Not yet mapped/processed: '+diagNoBoundary+'\n'
+        +'Missing (no usable planting date): '+diagNoPlantDate
         +(diagNoPlantDateExamples.length ? '\n\nPlanting-date examples:\n'+diagNoPlantDateExamples.join('\n') : '')
       ), 600);
     }
