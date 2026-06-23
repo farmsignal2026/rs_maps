@@ -810,11 +810,13 @@ body {
     <div id="field-detail-panel" style="position:absolute;bottom:0;left:0;right:0;
          background:#fff;border-radius:16px 16px 0 0;border-top:1px solid #e8e4da;
          padding:14px 14px 16px;z-index:900;transform:translateY(100%);
-         transition:transform 0.3s ease;box-shadow:0 -4px 20px rgba(0,0,0,0.12)">
+         transition:transform 0.3s ease;box-shadow:0 -4px 20px rgba(0,0,0,0.12);
+         max-height:88vh;overflow-y:auto">
       <div style="width:36px;height:4px;background:#D3D1C7;border-radius:2px;margin:0 auto 10px"></div>
 
       <!-- Header row -->
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;
+           position:sticky;top:-14px;background:#fff;padding-top:14px;z-index:1">
         <div>
           <div style="font-size:15px;font-weight:700;color:#27500A" id="dp-name">–</div>
           <div style="font-size:11px;color:#639922;margin-top:2px" id="dp-code">–</div>
@@ -826,7 +828,7 @@ body {
       </div>
 
       <!-- NDVI mosaic image, when loaded from GitHub's PNG zip -->
-      <img id="dp-mosaic-img" style="display:none;width:100%;border-radius:10px;margin-bottom:8px;border:1px solid #e8e4da">
+      <img id="dp-mosaic-img" style="display:none;width:100%;max-height:160px;object-fit:contain;border-radius:10px;margin-bottom:8px;border:1px solid #e8e4da;background:#f7f5f0">
 
       <!-- NDVI trend / WATCH badge -->
       <span id="dp-watch-badge" style="display:none;font-size:10px;font-weight:700;padding:3px 9px;
@@ -841,9 +843,9 @@ body {
         </div>
         <div id="dp-stage-timeline"><!-- rendered by JS --></div>
         <div style="display:flex;gap:10px;font-size:9px;margin-top:4px;flex-wrap:wrap">
-          <span style="display:flex;align-items:center;gap:3px"><span style="width:8px;height:8px;background:#2ea84a;border-radius:1px;display:inline-block"></span><span style="color:#1a7a2e;font-weight:600">Good</span></span>
-          <span style="display:flex;align-items:center;gap:3px"><span style="width:8px;height:8px;background:#7dcf3a;border-radius:1px;display:inline-block"></span><span style="color:#5aaa1e;font-weight:600">Optimal</span></span>
-          <span style="display:flex;align-items:center;gap:3px"><span style="width:8px;height:8px;background:#f07c2a;border-radius:1px;display:inline-block"></span><span style="color:#c95f00;font-weight:600">Attention</span></span>
+          <span style="display:flex;align-items:center;gap:3px"><span style="width:8px;height:8px;background:#22a65a;border-radius:1px;display:inline-block"></span><span style="color:#15803d;font-weight:600">Good</span></span>
+          <span style="display:flex;align-items:center;gap:3px"><span style="width:8px;height:8px;background:#f59e0b;border-radius:1px;display:inline-block"></span><span style="color:#b45309;font-weight:600">Moderate</span></span>
+          <span style="display:flex;align-items:center;gap:3px"><span style="width:8px;height:8px;background:#dc2626;border-radius:1px;display:inline-block"></span><span style="color:#b91c1c;font-weight:600">Attention</span></span>
           <span style="display:flex;align-items:center;gap:3px"><span style="width:8px;height:8px;background:#D3D1C7;border-radius:1px;display:inline-block"></span><span style="color:#888780">Future</span></span>
           <span style="color:#888780;margin-left:auto">~val = expected</span>
         </div>
@@ -855,22 +857,22 @@ body {
           Pixel Distribution (2×2 m)
         </div>
         <div style="height:14px;border-radius:6px;overflow:hidden;display:flex;margin-bottom:5px">
-          <div id="px-good"      style="background:#2ea84a;transition:width 0.4s;width:0%"></div>
-          <div id="px-optimal"   style="background:#7dcf3a;transition:width 0.4s;width:0%"></div>
-          <div id="px-attention" style="background:#f07c2a;transition:width 0.4s;width:0%"></div>
+          <div id="px-good"      style="background:#22a65a;transition:width 0.4s;width:0%"></div>
+          <div id="px-optimal"   style="background:#f59e0b;transition:width 0.4s;width:0%"></div>
+          <div id="px-attention" style="background:#dc2626;transition:width 0.4s;width:0%"></div>
         </div>
         <div style="display:flex;gap:8px;font-size:10px">
           <span style="display:flex;align-items:center;gap:3px">
-            <span style="width:8px;height:8px;background:#2ea84a;border-radius:2px;display:inline-block"></span>
-            Good <b id="px-good-lbl" style="color:#1a7a2e">–</b>
+            <span style="width:8px;height:8px;background:#22a65a;border-radius:2px;display:inline-block"></span>
+            Good <b id="px-good-lbl" style="color:#15803d">–</b>
           </span>
           <span style="display:flex;align-items:center;gap:3px">
-            <span style="width:8px;height:8px;background:#7dcf3a;border-radius:2px;display:inline-block"></span>
-            Optimal <b id="px-optimal-lbl" style="color:#5aaa1e">–</b>
+            <span style="width:8px;height:8px;background:#f59e0b;border-radius:2px;display:inline-block"></span>
+            Moderate <b id="px-optimal-lbl" style="color:#b45309">–</b>
           </span>
           <span style="display:flex;align-items:center;gap:3px">
-            <span style="width:8px;height:8px;background:#f07c2a;border-radius:2px;display:inline-block"></span>
-            Attention <b id="px-attention-lbl" style="color:#c95f00">–</b>
+            <span style="width:8px;height:8px;background:#dc2626;border-radius:2px;display:inline-block"></span>
+            Attention <b id="px-attention-lbl" style="color:#b91c1c">–</b>
           </span>
         </div>
       </div>
@@ -4084,15 +4086,20 @@ async function loadFieldDataFromGitHub(){
             const dMin = i===0 ? 0 : STAGES[i-1].cumEnd;
             const dMax = s.cumEnd;
             if(dMin>age) return {ndvi:null, status:'future'};
-            let lastInStage=null;
+            // True average across every confirmed reading actually taken
+            // while in this stage -- not just the last one. This is what
+            // matches a manual average computed from the NDVI trends
+            // file, and is consistent with how the desktop dashboard's
+            // Stage Matrix scores each stage.
+            let sum=0, n=0;
             ndviInfo.history.forEach(h=>{
               if(h.confidence==='low') return;
               const a=Math.round((h.date-plantDate)/86400000);
-              if(a>=dMin && a<=dMax) lastInStage=h;
+              if(a>=dMin && a<=dMax){ sum+=h.ndvi; n++; }
             });
-            if(i===sf.idx) return {ndvi:ndviInfo.latest.ndvi, status, current:true};
-            if(lastInStage) return {ndvi:lastInStage.ndvi, status:statusForNdvi(lastInStage.ndvi, s)};
-            return {ndvi:null, status:'future'};
+            if(!n) return {ndvi:null, status:'future'};
+            const avgNdvi=sum/n;
+            return {ndvi:avgNdvi, status:statusForNdvi(avgNdvi, s), current:(i===sf.idx)};
           });
           newFields[newFields.length-1].healthStatus=status;
         }
