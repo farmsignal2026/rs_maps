@@ -3061,9 +3061,17 @@ function openMapView(onReady) {
     buildTileLayers();
     setMapStyle('satellite');
     buildMapLayers();
-    fitMapToLoadedFields();
     updateZoomLayers(13);
     leafletMap.on('zoomend', () => updateZoomLayers(leafletMap.getZoom()));
+    // First-ever init: the map container may not have finished its layout
+    // pass yet (the screen was just switched visible in this same tick),
+    // so fitBounds run immediately here could measure a stale/zero-sized
+    // container and produce the wrong zoom/center. Force a resize
+    // recalculation and defer the actual fit to the next frame.
+    requestAnimationFrame(()=>{
+      leafletMap.invalidateSize();
+      fitMapToLoadedFields();
+    });
     leafletMap.on('click', (e) => {
       if(!e.originalEvent.target.closest('.leaflet-marker-icon, .leaflet-interactive'))
         closeDetailPanel();
