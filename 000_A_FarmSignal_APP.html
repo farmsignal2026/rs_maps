@@ -1998,7 +1998,7 @@ let fieldGeoData = [
     polygon:[[10.8657,78.8226],[10.8659,78.8249],[10.8658,78.8255],[10.8644,78.8252],[10.8642,78.8227],[10.8650,78.8222]],
     ndvi:0.82, prevNdvi:0.79, prevDate:'27 Apr 2026',
     healthStatus:'good', growthStage:'Grand Growth', growthDays:180,
-    thresholdMin:0.70, thresholdMax:0.80,
+    thresholdMin:0.65, thresholdMax:0.80,
     pixelDist:{good:62,optimal:30,attention:8},
     lastFetch:'08 May 2026', cloudCover:'4%',
     stageData:[
@@ -2012,7 +2012,7 @@ let fieldGeoData = [
     polygon:[[10.8924,78.8469],[10.8927,78.8483],[10.8919,78.8487],[10.8914,78.8473],[10.8918,78.8466]],
     ndvi:0.51, prevNdvi:0.56, prevDate:'27 Apr 2026',
     healthStatus:'attention', growthStage:'Tillering', growthDays:68,
-    thresholdMin:0.60, thresholdMax:0.75,
+    thresholdMin:0.55, thresholdMax:0.70,
     pixelDist:{good:5,optimal:28,attention:67},
     lastFetch:'08 May 2026', cloudCover:'6%',
     stageData:[
@@ -2040,7 +2040,7 @@ let fieldGeoData = [
     polygon:[[10.8784,78.8594],[10.8786,78.8610],[10.8778,78.8613],[10.8774,78.8597],[10.8780,78.8591]],
     ndvi:0.38, prevNdvi:0.51, prevDate:'27 Apr 2026',
     healthStatus:'attention', growthStage:'Early Tiller', growthDays:48,
-    thresholdMin:0.40, thresholdMax:0.60,
+    thresholdMin:0.35, thresholdMax:0.60,
     pixelDist:{good:3,optimal:21,attention:76},
     lastFetch:'08 May 2026', cloudCover:'9%',
     stageData:[
@@ -2054,7 +2054,7 @@ let fieldGeoData = [
     polygon:[[10.8705,78.8500],[10.8707,78.8518],[10.8697,78.8522],[10.8693,78.8505],[10.8700,78.8497]],
     ndvi:0.68, prevNdvi:0.75, prevDate:'27 Apr 2026',
     healthStatus:'good', growthStage:'Tillering', growthDays:110,
-    thresholdMin:0.60, thresholdMax:0.75,
+    thresholdMin:0.55, thresholdMax:0.70,
     pixelDist:{good:44,optimal:38,attention:18},
     lastFetch:'08 May 2026', cloudCover:'5%',
     stageData:[
@@ -2068,7 +2068,7 @@ let fieldGeoData = [
     polygon:[[10.9060,78.8820],[10.9062,78.8838],[10.9052,78.8842],[10.9048,78.8825],[10.9055,78.8818]],
     ndvi:0.42, prevNdvi:0.44, prevDate:'27 Apr 2026',
     healthStatus:'attention', growthStage:'Tillering', growthDays:75,
-    thresholdMin:0.60, thresholdMax:0.75,
+    thresholdMin:0.55, thresholdMax:0.70,
     pixelDist:{good:6,optimal:32,attention:62},
     lastFetch:'08 May 2026', cloudCover:'5%',
     stageData:[
@@ -2082,7 +2082,7 @@ let fieldGeoData = [
     polygon:[[10.8825,78.8641],[10.8827,78.8658],[10.8817,78.8661],[10.8813,78.8644],[10.8820,78.8638]],
     ndvi:0.71, prevNdvi:0.77, prevDate:'27 Apr 2026',
     healthStatus:'good', growthStage:'Grand Growth', growthDays:165,
-    thresholdMin:0.70, thresholdMax:0.80,
+    thresholdMin:0.65, thresholdMax:0.80,
     pixelDist:{good:55,optimal:32,attention:13},
     lastFetch:'08 May 2026', cloudCover:'3%',
     stageData:[
@@ -2096,7 +2096,7 @@ let fieldGeoData = [
     polygon:[[10.8850,78.8380],[10.8852,78.8398],[10.8843,78.8402],[10.8838,78.8384],[10.8845,78.8377]],
     ndvi:0.44, prevNdvi:0.46, prevDate:'27 Apr 2026',
     healthStatus:'attention', growthStage:'Tillering', growthDays:92,
-    thresholdMin:0.60, thresholdMax:0.75,
+    thresholdMin:0.55, thresholdMax:0.70,
     pixelDist:{good:7,optimal:29,attention:64},
     lastFetch:'08 May 2026', cloudCover:'7%',
     stageData:[
@@ -2625,9 +2625,9 @@ function updateZoomLayers(zoom){
 // Crop stage definitions — mirrors the Supabase ndvi_thresholds table
 const STAGES=[
   {name:'Germination', short:'Germ',   days:30,  cumEnd:30,  tMin:0.20,tMax:0.40, expNdvi:0.30},
-  {name:'Early Tiller',short:'E.Till', days:30,  cumEnd:60,  tMin:0.35,tMax:0.60, expNdvi:0.50},
-  {name:'Tillering',   short:'Tiller', days:90,  cumEnd:150, tMin:0.55,tMax:0.75, expNdvi:0.68},
-  {name:'Grand Growth',short:'Gr.Gr',  days:90,  cumEnd:240, tMin:0.70,tMax:0.80, expNdvi:0.75},
+  {name:'Early Tiller',short:'E.Till', days:60,  cumEnd:90,  tMin:0.35,tMax:0.60, expNdvi:0.50},
+  {name:'Tillering',   short:'Tiller', days:60,  cumEnd:150, tMin:0.55,tMax:0.70, expNdvi:0.65},
+  {name:'Grand Growth',short:'Gr.Gr',  days:90,  cumEnd:240, tMin:0.65,tMax:0.80, expNdvi:0.75},
   {name:'Maturity',    short:'Matur',  days:120, cumEnd:360, tMin:0.60,tMax:0.70, expNdvi:0.65}
 ];
 const TOTAL_DAYS=360;
