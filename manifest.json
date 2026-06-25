@@ -1,0 +1,7 @@
+{
+  "ndvi_trends": "data/NDVItrends_25Jun2026_all.xlsx",
+  "pixel_class": "rasters/NDVI_PixelClass_25Jun2026.xlsx",
+  "png_zip": "NDVI_PNGs_25Jun2026.zip",
+  "s1_assessment": "s1_pipeline/realtime_assessment_20260625.csv",
+  "plot_photos": "plot_photo.zip"
+}
