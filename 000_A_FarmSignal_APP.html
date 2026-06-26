@@ -1937,7 +1937,7 @@ function getTotalPlots() {
   return fields.length; // CA: exact count from scoped fields
 }
 
-let activeTab = 'unmapped';
+let activeTab = 'mapped';
 let activeHealth = null;
 let cameFromWatch = false;  // true when reached Preview via Watch banner or a Need-Attention/Serious filtered list -- these want View Map to zoom straight to that field, not show the general overview
 let selectedIdx = 0;
@@ -3955,6 +3955,7 @@ async function loadFieldDataFromGitHub(){
           const plotKey=cols.find(k=>/^plot.?no\.?$/i.test(k)) || cols.find(k=>/plot/i.test(k)&&/no/i.test(k));
           const dateKey=cols.find(k=>/planting/i.test(k)&&/date/i.test(k));
           const farmerKey=cols.find(k=>/farmer.*nam/i.test(k))||cols.find(k=>/^farmer$/i.test(k));
+          const clientKey=cols.find(k=>/client/i.test(k))||cols.find(k=>/^mill$/i.test(k))||cols.find(k=>/factory/i.test(k));
           const divKey=cols.find(k=>/^division/i.test(k));
           const villKey=cols.find(k=>/^village/i.test(k));
           const areaKey=cols.find(k=>/area/i.test(k)&&/ac/i.test(k));
@@ -3967,6 +3968,7 @@ async function loadFieldDataFromGitHub(){
               if(!pid) return;
               fieldDetailsMeta[pid]={
                 farmer: farmerKey?String(row[farmerKey]||'').trim():'',
+                factory: clientKey?String(row[clientKey]||'').trim():'',
                 division: divKey?String(row[divKey]||'').trim():'',
                 village: villKey?String(row[villKey]||'').trim():'',
                 area: areaKey?String(row[areaKey]||''):'',
@@ -4009,7 +4011,7 @@ async function loadFieldDataFromGitHub(){
 
       newFields.push({
         name: fdMeta&&fdMeta.farmer ? fdMeta.farmer : 'Unknown farmer',
-        code, factory:'', division: fdMeta?fdMeta.division:'',
+        code, factory: fdMeta?fdMeta.factory:'', division: fdMeta?fdMeta.division:'',
         section:'', village: fdMeta?fdMeta.village:'',
         area: fdMeta?fdMeta.area:'', variety: fdMeta?fdMeta.variety:'',
         type: fdMeta?fdMeta.plotType:'', date:'', soil: fdMeta?fdMeta.soilType:'', phone:'',
@@ -4149,7 +4151,7 @@ async function doLogin() {
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById(found.landingScreen).classList.add('active');
   // Always pre-render all dashboard sections so they're ready when user navigates
-  showTab('unmapped'); renderFields(); renderHealthSummary();
+  showTab('mapped'); renderFields(); renderHealthSummary();
   renderScoutAlerts(); renderSurveyAlerts(); renderDamageList();
   if(found.landingScreen==='s-factory-dash') renderFactoryDash();
   updateBackButtons(found.landingScreen);
