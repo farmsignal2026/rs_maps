@@ -243,21 +243,6 @@ body {
       <div id="login-error" style="display:none;background:#fde8e8;color:#a00000;border:1px solid #f5a0a0;
            border-radius:8px;padding:8px 12px;font-size:12px;margin-bottom:12px;text-align:center"></div>
 
-      <!-- Role select -->
-      <div style="margin-bottom:12px">
-        <label style="font-size:11px;font-weight:600;color:#5F5E5A;text-transform:uppercase;letter-spacing:0.04em;display:block;margin-bottom:5px">Role</label>
-        <select id="login-role" onchange="updateLoginHint()"
-          style="width:100%;padding:10px 12px;border-radius:9px;border:1px solid #D3D1C7;
-          font-size:13px;color:#2C2C2A;background:#fff;outline:none;font-family:inherit;cursor:pointer">
-          <option value="">Select your role…</option>
-          <option value="vp">Group VP / Executive</option>
-          <option value="factory">Factory Head / Cane Head</option>
-          <option value="do">Division Officer (DO)</option>
-          <option value="eo">Extension Officer (EO)</option>
-          <option value="ca">Cane Assistant (CA)</option>
-        </select>
-      </div>
-
       <!-- Username -->
       <div style="margin-bottom:12px">
         <label style="font-size:11px;font-weight:600;color:#5F5E5A;text-transform:uppercase;letter-spacing:0.04em;display:block;margin-bottom:5px">Username</label>
@@ -295,11 +280,11 @@ body {
         <i class="ti ti-login" style="font-size:18px"></i> Sign In
       </button>
 
-      <!-- Demo hint -->
+      <!-- Login hint -->
       <div id="login-hint" style="margin-top:14px;background:#EAF3DE;border-radius:8px;
-           padding:9px 11px;font-size:11px;color:#3B6D11;display:none">
-        <div style="font-weight:600;margin-bottom:4px"><i class="ti ti-info-circle" style="font-size:12px"></i> Demo credentials</div>
-        <div id="login-hint-text" style="color:#5F5E5A;line-height:1.8"></div>
+           padding:9px 11px;font-size:11px;color:#3B6D11">
+        <div style="font-weight:600;margin-bottom:4px"><i class="ti ti-info-circle" style="font-size:12px"></i> Login</div>
+        <div id="login-hint-text" style="color:#5F5E5A;line-height:1.8">Username: rsclmap<br>Password: survey@123</div>
       </div>
     </div>
 
@@ -418,10 +403,6 @@ body {
         </div>
       </div>
 
-      <!-- WATCH banner — NDVI declining fields -->
-      <div id="watch-banner" style="background:#FFF8DC;border-radius:12px;border:1.5px solid #f0c030;
-           padding:10px 12px;margin-bottom:10px;display:none"></div>
-
       <!-- Progress -->
       <div class="progress-card">
         <div style="display:flex;justify-content:space-between;align-items:center">
@@ -435,6 +416,25 @@ body {
           <span id="progress-scope-line">4 Sections · 12 Villages</span>
           <span>Target: 100% by 30 Jun</span>
         </div>
+      </div>
+
+      <!-- Filters: Client/Factory, Division, Crop Type -->
+      <div style="display:flex;gap:6px;margin-bottom:10px">
+        <select id="filter-factory" onchange="renderFields()"
+          style="flex:1;padding:9px 8px;border-radius:9px;border:1px solid #D3D1C7;
+          font-size:12px;color:#2C2C2A;background:#fff;outline:none;font-family:inherit;cursor:pointer">
+          <option value="">All Clients</option>
+        </select>
+        <select id="filter-division" onchange="renderFields()"
+          style="flex:1;padding:9px 8px;border-radius:9px;border:1px solid #D3D1C7;
+          font-size:12px;color:#2C2C2A;background:#fff;outline:none;font-family:inherit;cursor:pointer">
+          <option value="">All Divisions</option>
+        </select>
+        <select id="filter-croptype" onchange="renderFields()"
+          style="flex:1;padding:9px 8px;border-radius:9px;border:1px solid #D3D1C7;
+          font-size:12px;color:#2C2C2A;background:#fff;outline:none;font-family:inherit;cursor:pointer">
+          <option value="">All Crop Types</option>
+        </select>
       </div>
 
       <!-- Search -->
@@ -2267,6 +2267,26 @@ function highlight(text, query) {
   return text.slice(0,idx)+'<mark style="background:#C0DD97;color:#27500A;border-radius:2px;padding:0 1px">'+text.slice(idx,idx+query.length)+'</mark>'+text.slice(idx+query.length);
 }
 
+function populateFieldFilters() {
+  const factorySel = document.getElementById('filter-factory');
+  const divisionSel = document.getElementById('filter-division');
+  const cropSel = document.getElementById('filter-croptype');
+  if(!factorySel || !divisionSel || !cropSel) return;
+
+  const uniq = key => [...new Set(fields.map(f=>f[key]).filter(Boolean))].sort();
+
+  const fill = (sel, values, allLabel) => {
+    const prev = sel.value;
+    sel.innerHTML = `<option value="">${allLabel}</option>` +
+      values.map(v=>`<option value="${v}">${v}</option>`).join('');
+    if(values.includes(prev)) sel.value = prev;
+  };
+
+  fill(factorySel, uniq('factory'), 'All Clients');
+  fill(divisionSel, uniq('division'), 'All Divisions');
+  fill(cropSel, uniq('type'), 'All Crop Types');
+}
+
 function clearSearch() {
   document.getElementById('search-input').value='';
   document.getElementById('search-clear').style.display='none';
@@ -2286,6 +2306,14 @@ function renderFields() {
   if(activeHealth) {
     list = list.filter(f => f.healthStatus === activeHealth);
   }
+
+  // Client/Factory, Division, Crop Type filters
+  const fFactory = (document.getElementById('filter-factory')||{value:''}).value;
+  const fDivision = (document.getElementById('filter-division')||{value:''}).value;
+  const fCropType = (document.getElementById('filter-croptype')||{value:''}).value;
+  if(fFactory) list = list.filter(f=>f.factory===fFactory);
+  if(fDivision) list = list.filter(f=>f.division===fDivision);
+  if(fCropType) list = list.filter(f=>f.type===fCropType);
 
   if(query) {
     const q = query.toLowerCase();
@@ -3647,94 +3675,17 @@ function submitFollowup() {
 
 const USERS = [
   {
-    username:'vp.sss', password:'group@123', role:'vp',
-    name:'S. Krishnaswamy', roleLabel:'Group VP',
+    username:'rsclmap', password:'survey@123', role:'cane_head',
+    name:'RSCL Map Team', roleLabel:'RSCL Map Team',
     scope:'RSCL Group · All Factories',
-    avatar:'ti-crown',
-    landingScreen:'s-factory-dash',
-    access:['factory_dash','reports','notifications'],
-    canScout:false, canGeotag:false, canEdit:false
-  },
-  {
-    username:'exec.sss', password:'group@123', role:'exec',
-    name:'P. Subramanian', roleLabel:'Group Executive',
-    scope:'RSCL Group · All Factories',
-    avatar:'ti-briefcase',
-    landingScreen:'s-factory-dash',
-    access:['factory_dash','reports','notifications'],
-    canScout:false, canGeotag:false, canEdit:false
-  },
-  {
-    username:'fh.rscl', password:'factory@123', role:'factory',
-    name:'K. Ravindran', roleLabel:'Factory Head',
-    scope:'RSCL Factory · All Divisions',
-    avatar:'ti-building-factory',
-    landingScreen:'s-factory-dash',
-    access:['factory_dash','division_dash','map','reports','notifications'],
-    canScout:false, canGeotag:false, canEdit:false
-  },
-  {
-    username:'ch.rscl', password:'factory@123', role:'cane_head',
-    name:'M. Selvakumar', roleLabel:'Cane Head',
-    scope:'RSCL Factory · All Divisions',
-    avatar:'ti-chart-bar',
-    landingScreen:'s-factory-dash',
-    access:['factory_dash','division_dash','map','reports','notifications','scout_view'],
-    canScout:false, canGeotag:false, canEdit:false
-  },
-  {
-    username:'do.trichy', password:'div@123', role:'do',
-    name:'K. Elumalai', roleLabel:'Division Officer',
-    scope:'RSCL Factory · Trichy Division',
-    avatar:'ti-map-2',
+    avatar:'ti-grain',
     landingScreen:'s-dashboard',
-    access:['division_dash','map','scout','geotag','reports'],
+    access:['factory_dash','division_dash','map','reports','notifications','scout_view','scout','geotag'],
     canScout:true, canGeotag:true, canEdit:true
-  },
-  {
-    username:'eo.trichy', password:'eo@123', role:'eo',
-    name:'R. Murugan', roleLabel:'Extension Officer',
-    scope:'RSCL Factory · Trichy Division',
-    avatar:'ti-user-check',
-    landingScreen:'s-dashboard',
-    access:['division_dash','map','scout','geotag'],
-    canScout:true, canGeotag:true, canEdit:true
-  },
-  {
-    username:'ca.ariyam', password:'sec@123', role:'ca',
-    name:'V. Senthilkumar', roleLabel:'Cane Assistant',
-    scope:'RSCL Factory · Ariyamangalam Section',
-    avatar:'ti-user',
-    landingScreen:'s-dashboard',
-    access:['division_dash','scout'],
-    canScout:true, canGeotag:false, canEdit:false
   }
 ];
 
 let currentUser = null;
-
-const ROLE_HINTS = {
-  vp:      'Username: vp.sss\nPassword: group@123',
-  exec:    'Username: exec.sss\nPassword: group@123',
-  factory: 'Username: fh.rscl\nPassword: factory@123',
-  cane_head:'Username: ch.rscl\nPassword: factory@123',
-  do:      'Username: do.trichy\nPassword: div@123',
-  eo:      'Username: eo.trichy\nPassword: eo@123',
-  ca:      'Username: ca.ariyam\nPassword: sec@123'
-};
-const ROLE_MAP = {
-  vp:'vp', exec:'exec', factory:'factory', cane_head:'factory', do:'do', eo:'eo', ca:'ca'
-};
-
-function updateLoginHint() {
-  const role = document.getElementById('login-role').value;
-  const hint = document.getElementById('login-hint');
-  const hintText = document.getElementById('login-hint-text');
-  if(!role){ hint.style.display='none'; return; }
-  const userRole = ROLE_MAP[role]||role;
-  const txt = ROLE_HINTS[userRole]||ROLE_HINTS[role];
-  if(txt){ hintText.innerHTML = txt.replace(/\n/g,'<br>'); hint.style.display='block'; }
-}
 
 function togglePw() {
   const inp = document.getElementById('login-pass');
@@ -4166,25 +4117,15 @@ async function loadFieldDataFromGitHub(){
 }
 
 async function doLogin() {
-  const role = document.getElementById('login-role').value;
   const user = document.getElementById('login-user').value.trim();
   const pass = document.getElementById('login-pass').value;
   const errEl = document.getElementById('login-error');
 
-  if(!role){ showLoginError('Please select your role.'); return; }
   if(!user){ showLoginError('Please enter your username.'); return; }
   if(!pass){ showLoginError('Please enter your password.'); return; }
 
   const found = USERS.find(u => u.username===user && u.password===pass);
   if(!found){ showLoginError('Invalid username or password. Please try again.'); return; }
-
-  // Validate role matches
-  const selectedRole = document.getElementById('login-role').value;
-  const roleMatch = {vp:['vp','exec'],factory:['factory','cane_head'],do:['do'],eo:['eo'],ca:['ca']};
-  if(!roleMatch[selectedRole]?.includes(found.role)){
-    showLoginError('Role does not match credentials. Please check your role selection.');
-    return;
-  }
 
   errEl.style.display='none';
 
@@ -4200,6 +4141,7 @@ async function doLogin() {
 
   // Load scoped fields for this user's division/section
   fields = getScopedFields();
+  populateFieldFilters();
 
   applyRoleUI();
   refreshDashboardStats();
@@ -4207,7 +4149,7 @@ async function doLogin() {
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById(found.landingScreen).classList.add('active');
   // Always pre-render all dashboard sections so they're ready when user navigates
-  showTab('unmapped'); renderFields(); renderHealthSummary(); renderWatchBanner();
+  showTab('unmapped'); renderFields(); renderHealthSummary();
   renderScoutAlerts(); renderSurveyAlerts(); renderDamageList();
   if(found.landingScreen==='s-factory-dash') renderFactoryDash();
   updateBackButtons(found.landingScreen);
@@ -4391,10 +4333,8 @@ function showUserMenu() {
 function doLogout() {
   currentUser = null;
   document.getElementById('user-menu-overlay').style.display='none';
-  document.getElementById('login-role').value='';
   document.getElementById('login-user').value='';
   document.getElementById('login-pass').value='';
-  document.getElementById('login-hint').style.display='none';
   screenHistory=[];
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('s-login').classList.add('active');
