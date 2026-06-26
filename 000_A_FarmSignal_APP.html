@@ -420,7 +420,7 @@ body {
 
       <!-- Filters: Client/Factory, Division, Crop Type -->
       <div style="display:flex;gap:6px;margin-bottom:10px">
-        <select id="filter-factory" onchange="renderFields()"
+        <select id="filter-factory" onchange="onFactoryFilterChange()"
           style="flex:1;padding:9px 8px;border-radius:9px;border:1px solid #D3D1C7;
           font-size:12px;color:#2C2C2A;background:#fff;outline:none;font-family:inherit;cursor:pointer">
           <option value="">All Clients</option>
@@ -2267,24 +2267,51 @@ function highlight(text, query) {
   return text.slice(0,idx)+'<mark style="background:#C0DD97;color:#27500A;border-radius:2px;padding:0 1px">'+text.slice(idx,idx+query.length)+'</mark>'+text.slice(idx+query.length);
 }
 
+// Crop-cycle order (not alphabetical) -- same convention as the desktop
+// dashboard: Plant Crop, Ratoon 1-4, Maintenance Ratoon, Nursery.
+const PLOTTYPE_ORDER=['PL','R1','R2','R3','R4','MR','NU'];
+function cropTypeSortKey(v){
+  const i=PLOTTYPE_ORDER.indexOf(String(v||'').toUpperCase());
+  return i===-1 ? PLOTTYPE_ORDER.length : i;
+}
+
 function populateFieldFilters() {
   const factorySel = document.getElementById('filter-factory');
   const divisionSel = document.getElementById('filter-division');
   const cropSel = document.getElementById('filter-croptype');
   if(!factorySel || !divisionSel || !cropSel) return;
 
-  const uniq = key => [...new Set(fields.map(f=>f[key]).filter(Boolean))].sort();
-
   const fill = (sel, values, allLabel) => {
     const prev = sel.value;
     sel.innerHTML = `<option value="">${allLabel}</option>` +
       values.map(v=>`<option value="${v}">${v}</option>`).join('');
-    if(values.includes(prev)) sel.value = prev;
+    if(values.includes(prev)) sel.value = prev; else sel.value='';
   };
 
-  fill(factorySel, uniq('factory'), 'All Clients');
-  fill(divisionSel, uniq('division'), 'All Divisions');
-  fill(cropSel, uniq('type'), 'All Crop Types');
+  // Client/Factory -- full list, independent of other filters.
+  const allFactories=[...new Set(fields.map(f=>f.factory).filter(Boolean))].sort();
+  fill(factorySel, allFactories, 'All Clients');
+
+  // Division -- cascades from the selected factory, so picking a mill
+  // only shows the divisions that actually belong to it.
+  const selectedFactory=factorySel.value;
+  const divScope = selectedFactory ? fields.filter(f=>f.factory===selectedFactory) : fields;
+  const divisions=[...new Set(divScope.map(f=>f.division).filter(Boolean))].sort();
+  fill(divisionSel, divisions, 'All Divisions');
+
+  // Crop Type -- full list, sorted by crop-cycle order (PL, R1, R2... MR, NU)
+  // instead of alphabetically.
+  const cropTypes=[...new Set(fields.map(f=>f.type).filter(Boolean))]
+    .sort((a,b)=>cropTypeSortKey(a)-cropTypeSortKey(b) || String(a).localeCompare(String(b)));
+  fill(cropSel, cropTypes, 'All Crop Types');
+}
+
+// Factory changed -- division options must cascade, so repopulate filters
+// (which recomputes the division list against the new factory) before
+// re-rendering the field list.
+function onFactoryFilterChange() {
+  populateFieldFilters();
+  renderFields();
 }
 
 function clearSearch() {
