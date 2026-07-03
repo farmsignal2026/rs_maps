@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Farm Signal GeoTag – Mobile App Prototype</title>
+<title>FarmSignal · RSCL Field App v2.1</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.css"/>
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.js"></script>
@@ -620,19 +620,18 @@ body {
       <!-- Real Leaflet map -->
       <div id="geotag-map" style="flex:1;min-height:320px;z-index:1"></div>
 
-      <!-- GPS Accuracy HUD -->
+      <!-- GPS Accuracy HUD - compact -->
       <div id="gps-acc-hud" style="position:absolute;top:8px;left:8px;z-index:500;
-        background:rgba(255,255,255,0.95);border-radius:10px;padding:8px 12px;
-        box-shadow:0 2px 8px rgba(0,0,0,0.2);min-width:160px">
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-          <i class="ti ti-satellite" style="font-size:14px;color:#0F6E56"></i>
-          <span style="font-size:11px;font-weight:700;color:#2C2C2A">GPS Accuracy</span>
+        background:rgba(0,0,0,0.65);border-radius:8px;padding:5px 9px;
+        backdrop-filter:blur(4px);min-width:120px">
+        <div style="display:flex;align-items:center;gap:5px">
+          <i class="ti ti-satellite" style="font-size:11px;color:#9fd8ae"></i>
+          <span id="acc-value" style="font-size:13px;font-weight:800;color:#fff">…</span>
+          <span id="acc-status" style="font-size:10px;color:#9fd8ae;font-weight:600"></span>
         </div>
-        <div id="acc-value" style="font-size:18px;font-weight:800;color:#dc2626">Acquiring…</div>
-        <div class="accuracy-bar" style="margin:4px 0">
-          <div class="accuracy-fill" id="acc-fill" style="width:0%;background:#dc2626"></div>
+        <div class="accuracy-bar" style="margin:3px 0 0;height:3px;border-radius:2px;background:rgba(255,255,255,0.2)">
+          <div id="acc-fill" style="height:100%;width:0%;border-radius:2px;background:#dc2626;transition:width 0.3s,background 0.3s"></div>
         </div>
-        <div id="acc-status" style="font-size:10px;color:#888780">Move to open sky for better accuracy</div>
       </div>
 
       <!-- Area display -->
@@ -2813,23 +2812,34 @@ function geotagInit(){
   const mapEl = document.getElementById('geotag-map');
   if(!mapEl) return;
 
-  // Init map centred on Tamil Nadu
-  if(geotagMap){ geotagMap.remove(); geotagMap=null; }
-  geotagMap = L.map('geotag-map', {zoomControl:true, attributionControl:false});
+  // Destroy previous map instance cleanly
+  if(geotagMap){
+    geotagStopGPS();
+    geotagMap.remove();
+    geotagMap = null;
+  }
+  // Reset all references
+  geotagLayer     = null;
+  geotagLocMarker = null;
+  geotagPolyline  = null;
+  geotagMarkers   = [];
+  geotagPoints    = [];
+
+  // Create new map
+  geotagMap = L.map('geotag-map', {
+    zoomControl: true,
+    attributionControl: false,
+    tap: true   // enable tap on iOS
+  });
 
   setMapLayer(geotagMapLayer);
 
-  // Try to centre on user's location
+  // Start at last known position or Tamil Nadu
   if(geotagCurrentPos){
     geotagMap.setView([geotagCurrentPos.lat, geotagCurrentPos.lng], 18);
   } else {
     geotagMap.setView([11.0, 79.0], 14);
   }
-
-  // Reset state
-  geotagPoints   = [];
-  geotagMarkers  = [];
-  geotagPolyline = null;
 
   geotagRenderMap();
   geotagStartGPS();
@@ -2885,35 +2895,43 @@ function geotagStartGPS(){
       const acc = pos.coords.accuracy;
       geotagCurrentPos = {lat, lng, acc};
 
-      // Update accuracy HUD
-      const accEl  = document.getElementById('acc-value');
-      const fillEl = document.getElementById('acc-fill');
-      const statEl = document.getElementById('acc-status');
-      if(accEl) accEl.textContent = acc.toFixed(1)+' m';
-      const pct = Math.max(0, Math.min(100, (1 - acc/30)*100));
-      const col = acc<=5?'#16a34a': acc<=10?'#ca8a04': '#dc2626';
-      if(fillEl){ fillEl.style.width=pct+'%'; fillEl.style.background=col; }
-      if(accEl)   accEl.style.color = col;
-      if(statEl)  statEl.textContent = acc<=10 ? 'Ready to capture ✓' : 'Move to open sky for better accuracy';
+      // Update compact accuracy HUD
+      const accVal  = document.getElementById('acc-value');
+      const accFill = document.getElementById('acc-fill');
+      const accStat = document.getElementById('acc-status');
+      const col = acc <= 5 ? '#4ade80' : acc <= 10 ? '#fbbf24' : '#f87171';
+      const pct = Math.max(5, Math.min(100, (1 - acc/30)*100));
+      if(accVal)  { accVal.textContent  = acc.toFixed(1)+'m'; accVal.style.color = col; }
+      if(accFill) { accFill.style.width = pct+'%'; accFill.style.background = col; }
+      if(accStat) {
+        accStat.textContent  = acc <= 10 ? '✓ Ready' : 'Poor';
+        accStat.style.color  = acc <= 10 ? '#4ade80' : '#f87171';
+      }
 
-      // Update live GPS dot on map
+      // Update or create live GPS dot — keep it persistent
       if(geotagMap){
         const latlng = L.latLng(lat, lng);
-        if(!geotagLocMarker){
+        if(!geotagLocMarker || !geotagMap.hasLayer(geotagLocMarker)){
           const icon = L.divIcon({
-            className:'',
-            html:'<div style="width:14px;height:14px;border-radius:50%;background:#3b82f6;border:3px solid #fff;box-shadow:0 0 0 3px rgba(59,130,246,0.4)"></div>',
-            iconSize:[14,14], iconAnchor:[7,7]
+            className: '',
+            html: '<div style="width:14px;height:14px;border-radius:50%;background:#3b82f6;'
+              +'border:3px solid #fff;box-shadow:0 0 0 4px rgba(59,130,246,0.35)"></div>',
+            iconSize: [14,14], iconAnchor: [7,7]
           });
           geotagLocMarker = L.marker(latlng, {icon, zIndexOffset:1000}).addTo(geotagMap);
+          // Centre map on first fix
           geotagMap.setView(latlng, 18);
         } else {
           geotagLocMarker.setLatLng(latlng);
         }
       }
     },
-    err => console.log('GPS watch error:', err.message),
-    {enableHighAccuracy:true, maximumAge:2000, timeout:20000}
+    err => {
+      const accVal = document.getElementById('acc-value');
+      if(accVal){ accVal.textContent = 'No GPS'; accVal.style.color = '#f87171'; }
+      console.log('GPS watch error:', err.code, err.message);
+    },
+    {enableHighAccuracy: true, maximumAge: 2000, timeout: 20000}
   );
 }
 
