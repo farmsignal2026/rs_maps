@@ -377,6 +377,15 @@ body {
             color:#fff;font-size:7px;font-weight:700;min-width:14px;height:14px;border-radius:7px;
             display:flex;align-items:center;justify-content:center;border:1.5px solid #3B6D11;padding:0 2px">3</span>
         </button>
+        <!-- Network status + sync queue badge -->
+        <div style="position:relative;display:flex;align-items:center;justify-content:center;width:30px;height:30px"
+          title="Network status" onclick="syncOfflineQueue()">
+          <span id="network-indicator" style="width:10px;height:10px;border-radius:50%;
+            background:#4ade80;display:block;box-shadow:0 0 0 3px rgba(74,222,128,0.25)"></span>
+          <span id="sync-badge" style="display:none;position:absolute;top:-4px;right:-4px;
+            background:#f59e0b;color:#fff;font-size:7px;font-weight:700;min-width:14px;height:14px;
+            border-radius:7px;align-items:center;justify-content:center;border:1.5px solid #1a3a6b;padding:0 2px">0</span>
+        </div>
       </div>
     </div>
     <div class="body">
@@ -2008,6 +2017,232 @@ function roleToLabel(role,factory_code){
   if(role==='viewer')  return 'Viewer';
   return role;
 }
+
+// ── OFFLINE CACHE (IndexedDB) ─────────────────────────────────────────────────
+// Stores field data on login so the app works without network in the field.
+// Sync queue stores scout reports and boundaries captured while offline.
+
+const CACHE_DB_NAME    = 'farmsignal_cache';
+const CACHE_DB_VERSION = 2;
+let cacheDB = null;
+
+function openCacheDB(){
+  return new Promise((res, rej)=>{
+    const req = indexedDB.open(CACHE_DB_NAME, CACHE_DB_VERSION);
+    req.onupgradeneeded = e=>{
+      const db = e.target.result;
+      // Field data store
+      if(!db.objectStoreNames.contains('fields'))
+        db.createObjectStore('fields', {keyPath:'code'});
+      // App state (currentUser, session)
+      if(!db.objectStoreNames.contains('app_state'))
+        db.createObjectStore('app_state', {keyPath:'key'});
+      // Sync queue for offline actions
+      if(!db.objectStoreNames.contains('sync_queue'))
+        db.createObjectStore('sync_queue', {keyPath:'id', autoIncrement:true});
+    };
+    req.onsuccess = e=>{ cacheDB = e.target.result; res(cacheDB); };
+    req.onerror   = e=>rej(e.target.error);
+  });
+}
+
+async function cachePut(store, value){
+  if(!cacheDB) await openCacheDB();
+  return new Promise((res, rej)=>{
+    const tx  = cacheDB.transaction(store, 'readwrite');
+    const req = tx.objectStore(store).put(value);
+    req.onsuccess = ()=>res(true);
+    req.onerror   = e=>rej(e.target.error);
+  });
+}
+
+async function cacheGet(store, key){
+  if(!cacheDB) await openCacheDB();
+  return new Promise((res, rej)=>{
+    const tx  = cacheDB.transaction(store, 'readonly');
+    const req = tx.objectStore(store).get(key);
+    req.onsuccess = e=>res(e.target.result);
+    req.onerror   = e=>rej(e.target.error);
+  });
+}
+
+async function cacheGetAll(store){
+  if(!cacheDB) await openCacheDB();
+  return new Promise((res, rej)=>{
+    const tx  = cacheDB.transaction(store, 'readonly');
+    const req = tx.objectStore(store).getAll();
+    req.onsuccess = e=>res(e.target.result);
+    req.onerror   = e=>rej(e.target.error);
+  });
+}
+
+async function cacheDelete(store, key){
+  if(!cacheDB) await openCacheDB();
+  return new Promise((res, rej)=>{
+    const tx  = cacheDB.transaction(store, 'readwrite');
+    const req = tx.objectStore(store).delete(key);
+    req.onsuccess = ()=>res(true);
+    req.onerror   = e=>rej(e.target.error);
+  });
+}
+
+// Save all field data to IndexedDB after Supabase load
+async function saveFieldsToCache(fields, geoData){
+  try {
+    await openCacheDB();
+    for(let i=0; i<fields.length; i++){
+      const f   = fields[i];
+      const geo = geoData[i] || {};
+      await cachePut('fields', {
+        code:        f.code,
+        field:       f,
+        geo:         {
+          ndvi:        geo.ndvi,
+          healthStatus:geo.healthStatus,
+          growthStage: geo.growthStage,
+          growthDays:  geo.growthDays,
+          lastFetch:   geo.lastFetch,
+          polygon:     geo.polygon,
+          centroid:    geo.centroid,
+          pngUrl:      geo.pngUrl,
+        },
+        cachedAt: new Date().toISOString(),
+      });
+    }
+    await cachePut('app_state', {key:'lastSync', value: new Date().toISOString()});
+    console.log('Cached', fields.length, 'fields to IndexedDB');
+  } catch(e){
+    console.warn('Cache save failed:', e.message);
+  }
+}
+
+// Load field data from IndexedDB when offline
+async function loadFieldsFromCache(){
+  try {
+    await openCacheDB();
+    const rows    = await cacheGetAll('fields');
+    const syncRow = await cacheGet('app_state', 'lastSync');
+    if(!rows || !rows.length) return false;
+    ALL_FIELDS   = rows.map(r=>r.field);
+    fieldGeoData = rows.map(r=>({
+      code:        r.field.code,
+      ndvi:        r.geo.ndvi || null,
+      healthStatus:r.geo.healthStatus || 'unknown',
+      growthStage: r.geo.growthStage  || 'Unknown',
+      growthDays:  r.geo.growthDays   || null,
+      lastFetch:   r.geo.lastFetch    || '',
+      polygon:     r.geo.polygon      || null,
+      centroid:    r.geo.centroid     || null,
+      pngUrl:      r.geo.pngUrl       || null,
+      prevNdvi:    null, prevDate:'',
+      thresholdMin:null, thresholdMax:null,
+      pixelDist:{good:0, optimal:0, attention:0},
+      stageData:[], cloudCover:'', mapped:!!(r.geo.polygon),
+    }));
+    fieldDataLoaded = true;
+    const syncTime = syncRow ? new Date(syncRow.value).toLocaleString('en-GB') : 'unknown';
+    console.log('Loaded', ALL_FIELDS.length, 'fields from cache. Last sync:', syncTime);
+    return syncTime;
+  } catch(e){
+    console.warn('Cache load failed:', e.message);
+    return false;
+  }
+}
+
+// ── SYNC QUEUE ────────────────────────────────────────────────────────────────
+// Queues actions (scout submit, boundary save) when offline
+// Replays them when network returns
+
+async function queueOfflineAction(type, payload){
+  await cachePut('sync_queue', {
+    type,
+    payload,
+    queuedAt: new Date().toISOString(),
+    status:   'pending',
+  });
+  console.log('Queued offline action:', type);
+  updateSyncBadge();
+}
+
+async function syncOfflineQueue(){
+  if(!navigator.onLine) return;
+  try {
+    const queue = await cacheGetAll('sync_queue');
+    if(!queue || !queue.length){ updateSyncBadge(); return; }
+    console.log('Syncing', queue.length, 'queued actions...');
+    let synced = 0;
+    for(const item of queue){
+      try {
+        if(item.type === 'scout_report'){
+          const {error} = await _sb.from('scout_reports').insert(item.payload);
+          if(!error){ await cacheDelete('sync_queue', item.id); synced++; }
+        }
+        else if(item.type === 'boundary'){
+          const {error} = await _sb.rpc('upsert_plot_boundary', {
+            p_plot_no: item.payload.plot_no,
+            p_geojson: item.payload.geojson
+          });
+          if(!error){ await cacheDelete('sync_queue', item.id); synced++; }
+        }
+      } catch(e){ console.warn('Sync failed for item', item.id, ':', e.message); }
+    }
+    if(synced > 0){
+      showSyncToast(synced + ' offline action'+(synced>1?'s':'')+' synced ✓');
+    }
+    updateSyncBadge();
+  } catch(e){ console.warn('Sync queue error:', e.message); }
+}
+
+function updateSyncBadge(){
+  cacheGetAll('sync_queue').then(queue=>{
+    const count = (queue||[]).filter(q=>q.status==='pending').length;
+    const badge = document.getElementById('sync-badge');
+    if(badge){
+      badge.textContent = count > 0 ? count : '';
+      badge.style.display = count > 0 ? 'flex' : 'none';
+    }
+  }).catch(()=>{});
+}
+
+function showSyncToast(msg){
+  let toast = document.getElementById('sync-toast');
+  if(!toast){
+    toast = document.createElement('div');
+    toast.id = 'sync-toast';
+    toast.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);'
+      +'background:#1a3a2a;color:#9fd8ae;padding:10px 18px;border-radius:20px;font-size:12px;'
+      +'font-weight:700;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.3)';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.style.display = 'block';
+  setTimeout(()=>{ toast.style.display='none'; }, 3000);
+}
+
+// ── NETWORK DETECTION ─────────────────────────────────────────────────────────
+window.addEventListener('online', ()=>{
+  console.log('Network restored -- syncing queue...');
+  showSyncToast('Back online -- syncing...');
+  syncOfflineQueue();
+  updateNetworkStatus(true);
+});
+
+window.addEventListener('offline', ()=>{
+  console.log('Network lost -- switching to offline mode');
+  updateNetworkStatus(false);
+});
+
+function updateNetworkStatus(isOnline){
+  const indicator = document.getElementById('network-indicator');
+  if(!indicator) return;
+  if(isOnline){
+    indicator.style.background = '#4ade80';
+    indicator.title = 'Online';
+  } else {
+    indicator.style.background = '#f87171';
+    indicator.title = 'Offline -- data saved locally';
+  }
+}
 </script>
 
 <script>
@@ -2809,6 +3044,11 @@ const GEOTAG_MIN_PTS   = 4;
 const GEOTAG_MAX_PTS   = 20;
 
 function geotagInit(){
+  if(typeof L === 'undefined'){
+    console.error('Leaflet not loaded yet');
+    setTimeout(geotagInit, 500);
+    return;
+  }
   const mapEl = document.getElementById('geotag-map');
   if(!mapEl) return;
 
@@ -3147,9 +3387,17 @@ async function geotagSaveBoundary(){
 
   } catch(e){
     console.error('Boundary save failed:', e);
-    geotagShowErr('Save failed: '+e.message);
+    // Queue for sync when back online
+    queueOfflineAction('boundary', {plot_no: f.code, geojson: geojson});
+    f.mapped = true;
+    geotagPhotoPlotCode = f.code;
+    geotagPhotoPlotName = f.name;
+    geotagStopGPS();
+    showSyncToast('Boundary saved offline -- will sync when online');
     saveBtn.disabled = false;
     saveBtn.innerHTML = '<i class="ti ti-check" style="font-size:18px"></i> Save Boundary & Add Photos →';
+    goTo("s-photo");
+    resetPhotoScreen();
   }
 }
 
@@ -3281,6 +3529,15 @@ function goToNextUnmapped() {
 // Login screen shown first — fields loaded after login by getScopedFields()
 // Stat cards start empty and are populated by refreshDashboardStats() after login
 updateBackButtons('s-dashboard');
+
+// Init cache DB and check sync queue on startup
+document.addEventListener('DOMContentLoaded', ()=>{
+  openCacheDB().then(()=>{
+    updateSyncBadge();
+    updateNetworkStatus(navigator.onLine);
+    if(navigator.onLine) syncOfflineQueue();
+  }).catch(e=>console.warn('Cache DB init failed:', e));
+});
 
 // =============================================
 // MAP VIEW — Leaflet with satellite/road tiles
@@ -3747,6 +4004,10 @@ function fitMapToLoadedFields(){
 }
 
 function openMapView(onReady) {
+  if(typeof L === 'undefined'){
+    setTimeout(()=>openMapView(onReady), 500);
+    return;
+  }
   goTo('s-map');
   hideScoutBanner();
   closeDetailPanel();   // always start clean -- a stale open panel from a
@@ -4591,7 +4852,9 @@ async function submitScout() {
 
   } catch(e) {
     console.error('Scout save failed:', e);
-    // Save locally as fallback
+    // Queue for sync when back online
+    await queueOfflineAction('scout_report', reportRow);
+    // Also update local scoutDB for immediate UI
     scoutDB[fieldCode] = {
       ...(scoutDB[fieldCode]||{}),
       status:'scouted', scoutDate:today, followupDue,
@@ -4600,7 +4863,7 @@ async function submitScout() {
     syncSavedScouts();
     btn.disabled = false;
     btn.innerHTML = '<i class="ti ti-binoculars" style="font-size:18px"></i> Submit Scout Report';
-    alert('Saved locally (sync failed - will retry)\n\n'+e.message);
+    showSyncToast('Saved offline -- will sync when online');
     screenHistory=[]; goTo('s-scout-alerts'); renderScoutAlerts();
   }
 }
@@ -5051,7 +5314,14 @@ async function loadFieldDataFromSupabase(){
 
   }catch(err){
     console.error('loadFieldDataFromSupabase failed:', err);
-    alert('Could not load data from Supabase:\n\n' + err.message);
+    // Try loading from cache if network failed
+    console.log('Attempting to load from offline cache...');
+    const syncTime = await loadFieldsFromCache();
+    if(syncTime){
+      showSyncToast('Offline mode -- data from '+syncTime);
+      return true;
+    }
+    alert('Could not load data from Supabase:\n\n'+err.message+'\n\nNo offline cache available. Please connect to the internet.');
     return false;
   }
 }
@@ -5437,7 +5707,13 @@ async function doLogin() {
     };
 
     // Load field data from Supabase
-    await loadFieldDataFromSupabase();
+    const loaded = await loadFieldDataFromSupabase();
+
+    if(loaded){
+      // Save to IndexedDB cache for offline use
+      saveFieldsToCache(ALL_FIELDS, fieldGeoData);
+      await cachePut('app_state', {key:'currentUser', value: currentUser});
+    }
 
     fields = getScopedFields();
     populateFieldFilters();
