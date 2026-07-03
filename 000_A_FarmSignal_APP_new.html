@@ -599,83 +599,93 @@ body {
 
   <!-- ========== SCREEN 3: GPS CAPTURE ========== -->
   <div class="screen" id="s-gps">
-    <div class="app-bar">
+    <div class="app-bar" style="background:#1a3a2a">
       <button class="back-btn" onclick="goBack()"><i class="ti ti-arrow-left"></i></button>
-      <div>
-        <h1>Capture Field Boundary</h1>
-        <div class="sub">Walk corners · tap to mark GPS points</div>
+      <div style="flex:1">
+        <h1 style="color:#E1F5EE">Capture Field Boundary</h1>
+        <div class="sub" style="color:#9FE1CB" id="gps-header-sub">Walk corners · tap Add Point</div>
+      </div>
+      <!-- Map layer toggle -->
+      <div style="display:flex;gap:4px;align-items:center">
+        <button id="layer-osm-btn" onclick="setMapLayer('osm')"
+          style="font-size:9px;font-weight:700;padding:3px 7px;border-radius:6px;border:1px solid rgba(255,255,255,0.4);
+          background:rgba(255,255,255,0.25);color:#fff;cursor:pointer">OSM</button>
+        <button id="layer-esri-btn" onclick="setMapLayer('esri')"
+          style="font-size:9px;font-weight:700;padding:3px 7px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);
+          background:transparent;color:rgba(255,255,255,0.6);cursor:pointer">Satellite</button>
       </div>
     </div>
-    <div class="body">
-      <!-- Map -->
-      <div class="map-area">
-        <svg class="map-svg" viewBox="0 0 360 230" id="map-svg" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
-              <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#b8cca8" stroke-width="0.5"/>
-            </pattern>
-          </defs>
-          <rect width="360" height="230" fill="#d4e8c8"/>
-          <rect width="360" height="230" fill="url(#grid)"/>
-          <rect x="50" y="35" width="260" height="160" rx="6" fill="none" stroke="#a0bc88" stroke-width="1.5" stroke-dasharray="6,4"/>
-          <polygon id="poly" points="" fill="rgba(59,109,17,0.18)" stroke="#27500A" stroke-width="2.5" stroke-linejoin="round"/>
-          <g id="pts-group"></g>
-          <!-- Current GPS position -->
-          <circle id="acc-ring" cx="180" cy="115" r="28" fill="rgba(29,158,117,0.12)" stroke="#1D9E75" stroke-width="1.5" stroke-dasharray="4,3"/>
-          <circle cx="180" cy="115" r="6" fill="#1D9E75" stroke="#fff" stroke-width="2.5"/>
-          <text x="180" y="152" text-anchor="middle" font-size="10" fill="#3B6D11" font-weight="500">Your Location</text>
-          <!-- Compass -->
-          <text x="180" y="22" text-anchor="middle" font-size="10" fill="#5F5E5A" font-weight="600">N ↑</text>
-          <text x="348" y="118" text-anchor="middle" font-size="9" fill="#888">E</text>
-          <text x="12" y="118" text-anchor="middle" font-size="9" fill="#888">W</text>
-        </svg>
-        <div style="position:absolute;top:8px;right:10px;background:rgba(255,255,255,0.92);border-radius:8px;padding:4px 10px;font-size:10px;color:#5F5E5A;font-weight:500">
-          <i class="ti ti-zoom-in" style="font-size:11px"></i> Pinch to zoom
+
+    <div style="position:relative;flex:1;display:flex;flex-direction:column">
+      <!-- Real Leaflet map -->
+      <div id="geotag-map" style="flex:1;min-height:320px;z-index:1"></div>
+
+      <!-- GPS Accuracy HUD -->
+      <div id="gps-acc-hud" style="position:absolute;top:8px;left:8px;z-index:500;
+        background:rgba(255,255,255,0.95);border-radius:10px;padding:8px 12px;
+        box-shadow:0 2px 8px rgba(0,0,0,0.2);min-width:160px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+          <i class="ti ti-satellite" style="font-size:14px;color:#0F6E56"></i>
+          <span style="font-size:11px;font-weight:700;color:#2C2C2A">GPS Accuracy</span>
         </div>
-        <div style="position:absolute;bottom:8px;left:10px;background:rgba(255,255,255,0.92);border-radius:8px;padding:4px 10px;font-size:10px;color:#3B6D11;font-weight:600" id="area-display">
-          Area: — Ac
+        <div id="acc-value" style="font-size:18px;font-weight:800;color:#dc2626">Acquiring…</div>
+        <div class="accuracy-bar" style="margin:4px 0">
+          <div class="accuracy-fill" id="acc-fill" style="width:0%;background:#dc2626"></div>
         </div>
+        <div id="acc-status" style="font-size:10px;color:#888780">Move to open sky for better accuracy</div>
       </div>
 
-      <!-- GPS Accuracy Panel -->
-      <div class="gps-panel">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <div style="font-size:13px;font-weight:600;color:#2C2C2A">
-            <i class="ti ti-satellite" style="font-size:15px;vertical-align:-2px;color:#0F6E56"></i>
-            GPS Accuracy
-          </div>
-          <div id="acc-label" style="font-size:13px;color:#0F6E56;font-weight:700">4.2 m — Good ✓</div>
-        </div>
-        <div class="accuracy-bar"><div class="accuracy-fill good" id="acc-fill" style="width:85%"></div></div>
-        <div style="font-size:10px;color:#888780;margin-bottom:8px">Capture allowed when accuracy ≤ 10 m. Move to open sky if poor.</div>
-        <div style="font-size:12px;color:#5F5E5A;font-weight:500;margin-bottom:5px">
-          Points Captured: <span id="pt-count" style="color:#3B6D11;font-weight:700">0</span>
-          <span style="color:#888780;font-weight:400"> / minimum 4 required</span>
-        </div>
-        <div class="pts-row" id="pts-row">
-          <span class="pt-chip pending">P1</span>
-          <span class="pt-chip pending">P2</span>
-          <span class="pt-chip pending">P3</span>
-          <span class="pt-chip pending">P4</span>
-        </div>
+      <!-- Area display -->
+      <div id="area-display" style="position:absolute;bottom:8px;left:8px;z-index:500;
+        background:rgba(26,58,42,0.9);color:#9fd8ae;border-radius:8px;padding:5px 10px;
+        font-size:12px;font-weight:700;display:none">
+        Area: <span id="area-value">–</span> Ac
       </div>
 
-      <div class="two-btn-row">
-        <button class="action-btn secondary" onclick="deleteLast()" style="margin:0;padding:11px;font-size:13px">
-          <i class="ti ti-arrow-back-up" style="font-size:16px"></i> Delete Last
-        </button>
-        <button class="action-btn amber" onclick="recaptureAll()" style="margin:0;padding:11px;font-size:13px">
-          <i class="ti ti-refresh" style="font-size:16px"></i> Reset All
-        </button>
+      <!-- Point count -->
+      <div style="position:absolute;top:8px;right:8px;z-index:500;
+        background:rgba(26,58,42,0.9);color:#9fd8ae;border-radius:8px;padding:5px 10px;font-size:11px;font-weight:700">
+        <span id="pt-count">0</span> pts
+        <span style="color:rgba(255,255,255,0.5);font-weight:400"> / 4 min</span>
       </div>
+
+      <!-- Error / warning message -->
+      <div id="geotag-err" style="display:none;position:absolute;bottom:55px;left:8px;right:8px;z-index:500;
+        background:#fde8e8;border:1px solid #f5a0a0;border-radius:8px;padding:8px 12px;
+        font-size:11px;color:#a00000;font-weight:600;text-align:center"></div>
     </div>
-    <div class="bottom-actions">
-      <button class="action-btn primary" id="capture-btn" onclick="capturePoint()">
+
+    <!-- Controls -->
+    <div style="padding:10px 12px;background:#f8f7f4;border-top:1px solid #e8e4da">
+      <!-- Points row -->
+      <div id="pts-row" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;min-height:24px"></div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <button onclick="geotagDeleteLast()"
+          style="padding:9px;border-radius:8px;border:1px solid #D3D1C7;background:#F1EFE8;
+          color:#5F5E5A;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px">
+          <i class="ti ti-arrow-back-up" style="font-size:15px"></i> Delete Last
+        </button>
+        <button onclick="geotagResetAll()"
+          style="padding:9px;border-radius:8px;border:1px solid #f5a0a0;background:#fde8e8;
+          color:#a00000;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px">
+          <i class="ti ti-refresh" style="font-size:15px"></i> Reset All
+        </button>
+      </div>
+
+      <button id="capture-btn" onclick="geotagCapturePoint()"
+        style="width:100%;padding:13px;border-radius:10px;border:none;
+        background:#1a3a2a;color:#fff;font-size:14px;font-weight:700;cursor:pointer;
+        display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:6px">
         <i class="ti ti-map-pin-plus" style="font-size:20px"></i>
-        <span id="capture-btn-txt">Capture Point P1</span>
+        <span id="capture-btn-txt">Add Point P1</span>
       </button>
-      <button class="action-btn secondary" id="save-btn" onclick="goTo('s-photo')" style="display:none">
-        <i class="ti ti-check" style="font-size:18px"></i>
+
+      <button id="save-boundary-btn" onclick="geotagSaveBoundary()"
+        style="display:none;width:100%;padding:13px;border-radius:10px;border:none;
+        background:#0F6E56;color:#fff;font-size:14px;font-weight:700;cursor:pointer;
+        align-items:center;justify-content:center;gap:8px">
+        <i class="ti ti-check" style="font-size:20px"></i>
         Save Boundary & Add Photos →
       </button>
     </div>
@@ -2736,20 +2746,21 @@ let screenHistory = [];
 
 function goTo(id, pushHistory=true) {
   const current = document.querySelector('.screen.active');
+  // Stop GPS watch when leaving geotag screen
+  if(current && current.id === 's-gps' && id !== 's-gps') geotagStopGPS();
   if(pushHistory && current) screenHistory.push(current.id);
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   document.getElementById('confirm-overlay').style.display='none';
   if(id==='s-gps') {
-    capturedPts=[]; renderGPS();
-    if(gpsMode==='geotag') {
-      const h=document.querySelector('#s-gps .app-bar h1');
-      if(h) h.textContent='Capture Field Boundary';
-      const sb=document.getElementById('save-boundary-btn');
-      if(sb){ sb.innerHTML='<i class="ti ti-check" style="font-size:16px"></i> Save Boundary & Add Photos →'; sb.onclick=()=>goTo('s-photo'); }
-    }
+    setTimeout(()=>{
+      geotagInit();
+      const f = selectedIdx!==null ? fields[selectedIdx] : null;
+      const sub = document.getElementById('gps-header-sub');
+      if(sub && f) sub.textContent = f.name + ' · ' + f.code;
+    }, 250);
   }
-  if(id==='s-photo') { photosCaptured=[false,false,false,false,false]; resetPhotos(); }
+  if(id==='s-photo') { photosCaptured=[false,false,false,false,false]; resetPhotoScreen(); }
   updateBackButtons(id);
 }
 
@@ -2766,110 +2777,472 @@ function updateBackButtons(screenId) {
   });
 }
 
+function resetPhotoScreen() { resetPhotos(); }
 function resetPhotos() {
-  ['Photo 1 *','Photo 2 *','Photo 3 *','Photo 4','Photo 5 — wide/panorama (optional)'].forEach((lbl,i)=>{
+  geotagPhotoCaptured = [null,null,null,null,null];
+  ['Photo 1 *','Photo 2 *','Photo 3 *','Photo 4','Photo 5 — panorama (optional)'].forEach((lbl,i)=>{
     const slot = document.getElementById('ph'+i);
+    if(!slot) return;
     const icon = i===4 ? 'ti-panorama' : 'ti-camera';
     slot.className='photo-slot';
-    slot.innerHTML=`<i class="ti ${icon}"></i><span>${lbl}</span>`;
+    slot.innerHTML='<i class="ti '+icon+'"></i><span>'+lbl+'</span>';
+    slot.onclick = ()=>capturePhoto(i);
   });
   document.getElementById('photo-count').textContent='0';
   document.getElementById('submit-lbl').textContent='Capture at least 3 photos to submit';
   document.getElementById('submit-btn').disabled=true;
 }
 
-function renderGPS() {
-  const n = capturedPts.length;
-  document.getElementById('pt-count').textContent=n;
-  const chips = ['P1','P2','P3','P4'];
-  for(let i=n;i<8;i++) chips.push('P'+(i+1));
-  const active = chips.slice(0,Math.max(4,n));
-  document.getElementById('pts-row').innerHTML = active.map((p,i)=>
-    `<span class="pt-chip${i>=n?' pending':''}">${p}</span>`
-  ).join('');
-  const poly = document.getElementById('poly');
-  const ptsGrp = document.getElementById('pts-group');
-  if(n>0){
-    const coords = capturedPts.map(i=>ptCoords[Math.min(i,ptCoords.length-1)]);
-    poly.setAttribute('points', coords.map(c=>c[0]+','+c[1]).join(' '));
-    ptsGrp.innerHTML = coords.map((c,i)=>`
-      <circle cx="${c[0]}" cy="${c[1]}" r="7" fill="#3B6D11" stroke="#fff" stroke-width="2.5"/>
-      <text x="${c[0]}" y="${c[1]-11}" text-anchor="middle" font-size="10" fill="#27500A" font-weight="700">P${i+1}</text>
-    `).join('');
-    // Rough area estimate
-    const areaEst = (n*0.42).toFixed(1);
-    document.getElementById('area-display').textContent = 'Area ≈ '+areaEst+' Ac';
+// ── GEOTAG BOUNDARY CAPTURE ──────────────────────────────────────────────────
+let geotagMap       = null;
+let geotagLayer     = null;   // current tile layer
+let geotagPoints    = [];     // [{lat,lng,acc}]
+let geotagMarkers   = [];     // Leaflet markers
+let geotagPolyline  = null;   // preview polygon outline
+let geotagLocMarker = null;   // live GPS dot
+let geotagWatchId   = null;   // geolocation watch
+let geotagCurrentPos= null;   // {lat,lng,acc}
+let geotagMapLayer  = 'osm';  // 'osm' or 'esri'
+
+const GEOTAG_ACC_GATE  = 10;   // metres -- reject points worse than this
+const GEOTAG_MIN_DIST  = 3;    // metres -- reject points too close together
+const GEOTAG_MIN_PTS   = 4;
+const GEOTAG_MAX_PTS   = 20;
+
+function geotagInit(){
+  const mapEl = document.getElementById('geotag-map');
+  if(!mapEl) return;
+
+  // Init map centred on Tamil Nadu
+  if(geotagMap){ geotagMap.remove(); geotagMap=null; }
+  geotagMap = L.map('geotag-map', {zoomControl:true, attributionControl:false});
+
+  setMapLayer(geotagMapLayer);
+
+  // Try to centre on user's location
+  if(geotagCurrentPos){
+    geotagMap.setView([geotagCurrentPos.lat, geotagCurrentPos.lng], 18);
   } else {
-    poly.setAttribute('points','');
-    ptsGrp.innerHTML='';
-    document.getElementById('area-display').textContent='Area: — Ac';
+    geotagMap.setView([11.0, 79.0], 14);
   }
-  const capBtn = document.getElementById('capture-btn');
-  const saveBtn = document.getElementById('save-btn');
-  document.getElementById('capture-btn-txt').textContent = 'Capture Point P'+(n+1);
-  if(n>=4){ saveBtn.style.display='flex'; }
-  else { saveBtn.style.display='none'; }
+
+  // Reset state
+  geotagPoints   = [];
+  geotagMarkers  = [];
+  geotagPolyline = null;
+
+  geotagRenderMap();
+  geotagStartGPS();
 }
 
-function capturePoint() {
-  if(capturedPts.length>=6){ alert('Maximum 8 points reached. Save the boundary.'); return; }
-  capturedPts.push(capturedPts.length);
-  renderGPS();
+function setMapLayer(type){
+  geotagMapLayer = type;
+  if(!geotagMap) return;
+
+  if(geotagLayer){ geotagMap.removeLayer(geotagLayer); }
+
+  if(type === 'esri'){
+    geotagLayer = L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      {maxZoom:19}
+    ).addTo(geotagMap);
+  } else {
+    geotagLayer = L.tileLayer(
+      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      {maxZoom:19}
+    ).addTo(geotagMap);
+  }
+
+  // Update toggle buttons
+  const osm  = document.getElementById('layer-osm-btn');
+  const esri = document.getElementById('layer-esri-btn');
+  if(osm && esri){
+    if(type==='osm'){
+      osm.style.background  = 'rgba(255,255,255,0.25)'; osm.style.color='#fff';
+      esri.style.background = 'transparent'; esri.style.color='rgba(255,255,255,0.6)';
+    } else {
+      esri.style.background = 'rgba(255,255,255,0.25)'; esri.style.color='#fff';
+      osm.style.background  = 'transparent'; osm.style.color='rgba(255,255,255,0.6)';
+    }
+  }
 }
 
-function deleteLast() {
-  if(capturedPts.length===0){ alert('No points to delete.'); return; }
-  capturedPts.pop();
-  renderGPS();
+function geotagStartGPS(){
+  if(!navigator.geolocation){ geotagShowErr('GPS not available on this device.'); return; }
+  if(geotagWatchId !== null) navigator.geolocation.clearWatch(geotagWatchId);
+
+  geotagWatchId = navigator.geolocation.watchPosition(
+    pos => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      const acc = pos.coords.accuracy;
+      geotagCurrentPos = {lat, lng, acc};
+
+      // Update accuracy HUD
+      const accEl  = document.getElementById('acc-value');
+      const fillEl = document.getElementById('acc-fill');
+      const statEl = document.getElementById('acc-status');
+      if(accEl) accEl.textContent = acc.toFixed(1)+' m';
+      const pct = Math.max(0, Math.min(100, (1 - acc/30)*100));
+      const col = acc<=5?'#16a34a': acc<=10?'#ca8a04': '#dc2626';
+      if(fillEl){ fillEl.style.width=pct+'%'; fillEl.style.background=col; }
+      if(accEl)   accEl.style.color = col;
+      if(statEl)  statEl.textContent = acc<=10 ? 'Ready to capture ✓' : 'Move to open sky for better accuracy';
+
+      // Update live GPS dot on map
+      if(geotagMap){
+        const latlng = L.latLng(lat, lng);
+        if(!geotagLocMarker){
+          const icon = L.divIcon({
+            className:'',
+            html:'<div style="width:14px;height:14px;border-radius:50%;background:#3b82f6;border:3px solid #fff;box-shadow:0 0 0 3px rgba(59,130,246,0.4)"></div>',
+            iconSize:[14,14], iconAnchor:[7,7]
+          });
+          geotagLocMarker = L.marker(latlng, {icon, zIndexOffset:1000}).addTo(geotagMap);
+          geotagMap.setView(latlng, 18);
+        } else {
+          geotagLocMarker.setLatLng(latlng);
+        }
+      }
+    },
+    err => console.log('GPS watch error:', err.message),
+    {enableHighAccuracy:true, maximumAge:2000, timeout:20000}
+  );
 }
 
-function recaptureAll() {
-  if(capturedPts.length===0) return;
-  if(confirm('Reset all captured points and start over?')){ capturedPts=[]; renderGPS(); }
+function geotagStopGPS(){
+  if(geotagWatchId !== null){
+    navigator.geolocation.clearWatch(geotagWatchId);
+    geotagWatchId = null;
+  }
 }
+
+// Haversine distance in metres
+function haversineM(lat1,lng1,lat2,lng2){
+  const R=6371000, dLat=(lat2-lat1)*Math.PI/180, dLng=(lng2-lng1)*Math.PI/180;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+// Check if segments (p1->p2) and (p3->p4) intersect
+function segmentsIntersect(p1,p2,p3,p4){
+  const d=(p2.lng-p1.lng)*(p4.lat-p3.lat)-(p2.lat-p1.lat)*(p4.lng-p3.lng);
+  if(Math.abs(d)<1e-10) return false;
+  const t=((p3.lng-p1.lng)*(p4.lat-p3.lat)-(p3.lat-p1.lat)*(p4.lng-p3.lng))/d;
+  const u=((p3.lng-p1.lng)*(p2.lat-p1.lat)-(p3.lat-p1.lat)*(p2.lng-p1.lng))/d;
+  return t>0.001 && t<0.999 && u>0.001 && u<0.999;
+}
+
+function geotagCheckIntersection(newPt){
+  const pts = geotagPoints;
+  const n   = pts.length;
+  if(n < 2) return false;
+  // The new segment is pts[n-1] -> newPt
+  const newSeg = {p1: pts[n-1], p2: newPt};
+  // Check against all existing segments except the last one (shared endpoint)
+  for(let i=0; i<n-2; i++){
+    if(segmentsIntersect(pts[i], pts[i+1], newSeg.p1, newSeg.p2)) return true;
+  }
+  return false;
+}
+
+// Shoelace formula for polygon area in sq metres -> acres
+function polygonAreaAcres(pts){
+  let area = 0;
+  const n = pts.length;
+  for(let i=0;i<n;i++){
+    const j=(i+1)%n;
+    const xi=pts[i].lng*Math.PI/180*6371000*Math.cos(pts[i].lat*Math.PI/180);
+    const yi=pts[i].lat*Math.PI/180*6371000;
+    const xj=pts[j].lng*Math.PI/180*6371000*Math.cos(pts[j].lat*Math.PI/180);
+    const yj=pts[j].lat*Math.PI/180*6371000;
+    area += xi*yj - xj*yi;
+  }
+  return Math.abs(area/2) * 0.000247105;
+}
+
+function geotagShowErr(msg){
+  const el = document.getElementById('geotag-err');
+  if(!el) return;
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(()=>{ el.style.display='none'; }, 3500);
+}
+
+function geotagCapturePoint(){
+  if(!geotagCurrentPos){ geotagShowErr('Waiting for GPS signal…'); return; }
+  const {lat, lng, acc} = geotagCurrentPos;
+
+  if(acc > GEOTAG_ACC_GATE){
+    geotagShowErr('GPS accuracy '+acc.toFixed(1)+'m is too poor. Need ≤10m.'); return;
+  }
+  if(geotagPoints.length >= GEOTAG_MAX_PTS){
+    geotagShowErr('Maximum '+GEOTAG_MAX_PTS+' points reached.'); return;
+  }
+
+  const newPt = {lat, lng, acc};
+
+  // Corner knot check -- too close to existing point
+  for(const p of geotagPoints){
+    const dist = haversineM(lat, lng, p.lat, p.lng);
+    if(dist < GEOTAG_MIN_DIST){
+      geotagShowErr('Point too close to P'+(geotagPoints.indexOf(p)+1)+' ('+dist.toFixed(1)+'m). Move further.'); return;
+    }
+  }
+
+  // Intersection check
+  if(geotagCheckIntersection(newPt)){
+    geotagShowErr('This point would create a self-crossing polygon. Reposition.'); return;
+  }
+
+  geotagPoints.push(newPt);
+  geotagRenderMap();
+}
+
+function geotagDeleteLast(){
+  if(!geotagPoints.length){ geotagShowErr('No points to delete.'); return; }
+  geotagPoints.pop();
+  geotagRenderMap();
+}
+
+function geotagResetAll(){
+  if(!geotagPoints.length) return;
+  if(confirm('Reset all captured points and start over?')){
+    geotagPoints = [];
+    geotagRenderMap();
+  }
+}
+
+function geotagRenderMap(){
+  const n = geotagPoints.length;
+
+  // Update point count and chips
+  document.getElementById('pt-count').textContent = n;
+  const ptsRow = document.getElementById('pts-row');
+  if(ptsRow){
+    ptsRow.innerHTML = Array.from({length:Math.max(4,n+1<=GEOTAG_MAX_PTS?n+1:n)},(_,i)=>
+      '<span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:10px;border:1px solid;'
+      +(i<n?'background:#1a3a2a;color:#9fd8ae;border-color:#1a3a2a':'background:#F1EFE8;color:#888780;border-color:#D3D1C7')
+      +'">'+(i<n?'P'+(i+1)+' ✓':'P'+(i+1))+'</span>'
+    ).join('');
+  }
+
+  // Update capture button
+  document.getElementById('capture-btn-txt').textContent = 'Add Point P'+(n+1);
+
+  // Show/hide save button
+  const saveBtn = document.getElementById('save-boundary-btn');
+  if(saveBtn) saveBtn.style.display = n >= GEOTAG_MIN_PTS ? 'flex' : 'none';
+
+  // Clear existing markers and polygon
+  geotagMarkers.forEach(m => geotagMap && geotagMap.removeLayer(m));
+  geotagMarkers = [];
+  if(geotagPolyline && geotagMap){ geotagMap.removeLayer(geotagPolyline); geotagPolyline=null; }
+
+  if(!geotagMap || !n) return;
+
+  // Draw polygon
+  const latlngs = geotagPoints.map(p => [p.lat, p.lng]);
+  geotagPolyline = L.polygon(latlngs, {
+    color:'#27500A', weight:2.5, fillColor:'#3b6d11', fillOpacity:0.15,
+    dashArray: n < GEOTAG_MIN_PTS ? '6,4' : null
+  }).addTo(geotagMap);
+
+  // Draw numbered markers
+  geotagPoints.forEach((p,i)=>{
+    const icon = L.divIcon({
+      className:'',
+      html:'<div style="width:22px;height:22px;border-radius:50%;background:#1a3a2a;border:2px solid #fff;'
+        +'color:#9fd8ae;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;'
+        +'box-shadow:0 1px 4px rgba(0,0,0,0.4)">P'+(i+1)+'</div>',
+      iconSize:[22,22], iconAnchor:[11,11]
+    });
+    const m = L.marker([p.lat, p.lng], {icon}).addTo(geotagMap);
+    geotagMarkers.push(m);
+  });
+
+  // Fit map to polygon
+  if(n >= 2) geotagMap.fitBounds(geotagPolyline.getBounds(), {padding:[30,30]});
+
+  // Area display
+  const areaEl = document.getElementById('area-display');
+  if(areaEl && n >= 3){
+    const acres = polygonAreaAcres(geotagPoints);
+    document.getElementById('area-value').textContent = acres.toFixed(2);
+    areaEl.style.display = 'block';
+  } else if(areaEl){
+    areaEl.style.display = 'none';
+  }
+}
+
+async function geotagSaveBoundary(){
+  const pts = geotagPoints;
+  if(pts.length < GEOTAG_MIN_PTS){ geotagShowErr('Need at least '+GEOTAG_MIN_PTS+' points.'); return; }
+
+  const f = selectedIdx !== null ? fields[selectedIdx] : null;
+  if(!f){ alert('No field selected.'); return; }
+
+  const saveBtn = document.getElementById('save-boundary-btn');
+  saveBtn.disabled = true;
+  saveBtn.innerHTML = '<i class="ti ti-loader-2" style="font-size:18px"></i> Saving…';
+
+  // Build GeoJSON polygon (close the ring by repeating first point)
+  const coords = pts.map(p=>[p.lng, p.lat]);
+  coords.push(coords[0]);  // close ring
+  const geojson = JSON.stringify({type:'Polygon', coordinates:[coords]});
+  const gpsAcres = polygonAreaAcres(pts);
+
+  try {
+    // Save boundary via RPC
+    const {error:rpcErr} = await _sb.rpc('upsert_plot_boundary', {
+      p_plot_no:  f.code,
+      p_geojson:  geojson
+    });
+    if(rpcErr) throw rpcErr;
+
+    // Update gps_area_acres in plots
+    await _sb.from('plots').update({gps_area_acres: parseFloat(gpsAcres.toFixed(3))}).eq('plot_no', f.code);
+
+    // Mark as mapped in local fields array
+    f.mapped = true;
+    const geo = getGeoByCode(f.code);
+    if(geo){ geo.mapped=true; geo.polygon=pts.map(p=>[p.lat,p.lng]); }
+
+    // Stop GPS watch
+    geotagStopGPS();
+
+    saveBtn.disabled = false;
+    saveBtn.innerHTML = '<i class="ti ti-check" style="font-size:18px"></i> Save Boundary & Add Photos →';
+
+    // Navigate to photo capture
+    geotagPhotoPlotCode = f.code;
+    geotagPhotoPlotName = f.name;
+    goTo('s-photo');
+    resetPhotoScreen();
+
+  } catch(e){
+    console.error('Boundary save failed:', e);
+    geotagShowErr('Save failed: '+e.message);
+    saveBtn.disabled = false;
+    saveBtn.innerHTML = '<i class="ti ti-check" style="font-size:18px"></i> Save Boundary & Add Photos →';
+  }
+}
+
+let geotagPhotoPlotCode = null;
+let geotagPhotoPlotName = null;
+
+// Legacy stubs (keep old function names working)
+function renderGPS(){ geotagRenderMap(); }
+function capturePoint(){ geotagCapturePoint(); }
+function deleteLast(){ geotagDeleteLast(); }
+function recaptureAll(){ geotagResetAll(); }
+
+let geotagPhotoCaptured = [null,null,null,null,null];
 
 function capturePhoto(idx) {
-  photosCaptured[idx]=true;
-  const labels=['Photo 1 *','Photo 2 *','Photo 3 *','Photo 4','Photo 5 — panorama (optional)'];
-  const slot=document.getElementById('ph'+idx);
-  slot.className='photo-slot filled';
-  slot.innerHTML=`<i class="ti ti-check" style="font-size:28px"></i><span>${labels[idx]} ✓</span>`;
-  const count=photosCaptured.filter(Boolean).length;
-  document.getElementById('photo-count').textContent=count;
-  const btn=document.getElementById('submit-btn');
-  const lbl=document.getElementById('submit-lbl');
-  if(count>=3){
-    btn.disabled=false;
-    lbl.textContent='Submit GeoTag ('+count+' photos ready)';
-  } else {
-    btn.disabled=true;
-    lbl.textContent='Capture at least 3 photos ('+count+'/3)';
-  }
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = 'image/*';
+  if(/Android|iPhone|iPad/i.test(navigator.userAgent)) input.capture = 'environment';
+  input.style.display = 'none';
+  document.body.appendChild(input);
+  input.onchange = () => {
+    const file = input.files && input.files[0];
+    document.body.removeChild(input);
+    if(!file) return;
+    geotagPhotoCaptured[idx] = file;
+    const slot = document.getElementById('ph'+idx);
+    slot.className = 'photo-slot filled';
+    const reader = new FileReader();
+    reader.onload = e => {
+      slot.style.backgroundImage = 'url('+e.target.result+')';
+      slot.style.backgroundSize = 'cover'; slot.style.backgroundPosition = 'center';
+      slot.innerHTML = '<div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.5);color:#fff;font-size:9px;padding:2px 4px;text-align:center">Photo '+(idx+1)+' ✓</div>';
+      slot.style.position = 'relative'; slot.style.overflow = 'hidden';
+    };
+    reader.readAsDataURL(file);
+    const count = geotagPhotoCaptured.filter(Boolean).length;
+    document.getElementById('photo-count').textContent = count;
+    const btn = document.getElementById('submit-btn');
+    const lbl = document.getElementById('submit-lbl');
+    if(count >= 3){ btn.disabled=false; lbl.textContent='Submit GeoTag ('+count+' photos ready)'; }
+    else { btn.disabled=true; lbl.textContent='Capture at least 3 photos ('+count+'/3)'; }
+  };
+  document.body.appendChild(input);
+  input.click();
 }
 
 function showConfirm() {
-  const f=fields[selectedIdx];
-  const pc=photosCaptured.filter(Boolean).length;
-  document.getElementById('cfm-name').textContent=f.name;
-  document.getElementById('cfm-code').textContent=f.code;
-  document.getElementById('cfm-pts').textContent=capturedPts.length+' points captured';
-  document.getElementById('cfm-photos').textContent=pc+' photos captured';
-  document.getElementById('confirm-overlay').style.display='flex';
+  // Skip confirm overlay — go straight to submit
+  doSubmit();
 }
 
 function hideConfirm() {
   document.getElementById('confirm-overlay').style.display='none';
 }
 
-function doSubmit() {
-  const f=fields[selectedIdx];
-  f.mapped=true;
-  document.getElementById('s-farmer').textContent=f.name;
-  document.getElementById('s-code').textContent=f.code;
-  document.getElementById('s-name2').textContent=f.name;
-  document.getElementById('s-village').textContent=f.village;
-  document.getElementById('s-pts').textContent=capturedPts.length+' GPS points';
-  document.getElementById('s-photos').textContent=photosCaptured.filter(Boolean).length+' photos';
+async function doSubmit() {
+  const f = fields[selectedIdx];
+  if(!f){ alert('No field selected.'); return; }
+
+  const photos = geotagPhotoCaptured.filter(Boolean);
+  if(photos.length < 3){ alert('Please capture at least 3 photos.'); return; }
+
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader-2" style="font-size:18px"></i> Uploading photos…';
+
+  const plotCode    = geotagPhotoPlotCode || f.code;
+  const factoryCode = currentUser && currentUser.factory_code ? currentUser.factory_code : 'RSCL';
+  const now         = new Date();
+  const photoUrls   = [];
+
+  for(let i=0; i<geotagPhotoCaptured.length; i++){
+    const file = geotagPhotoCaptured[i];
+    if(!file) continue;
+    try {
+      const ext  = file.name.split('.').pop() || 'jpg';
+      const name = ['north','south','east','west','overview'][i] || ('photo'+(i+1));
+      const path = factoryCode+'/'+plotCode+'/geotag/'+name+'.'+ext;
+
+      const {error:upErr} = await _sb.storage.from('field-photos')
+        .upload(path, file, {upsert:true, contentType: file.type||'image/jpeg'});
+      if(upErr){ console.error('Photo upload error:', upErr); continue; }
+
+      const url = SB_URL+'/storage/v1/object/public/field-photos/'+path;
+      photoUrls.push(url);
+
+      await _sb.from('field_photos').insert({
+        plot_no:      plotCode,
+        storage_path: path,
+        source:       'geotag',
+        taken_at:     now.toISOString(),
+      });
+      console.log('Geotag photo', i+1, 'uploaded:', path);
+    } catch(e){ console.error('Photo', i+1, 'upload failed:', e.message); }
+  }
+
+  // Mark plot as mapped
+  await _sb.from('plots').update({is_mapped: true}).eq('plot_no', plotCode);
+  f.mapped = true;
+  const geo = getGeoByCode(plotCode);
+  if(geo) geo.mapped = true;
+
+  // Update success screen
+  const sfarmer = document.getElementById('s-farmer');
+  const scode   = document.getElementById('s-code');
+  const sname2  = document.getElementById('s-name2');
+  const svillage= document.getElementById('s-village');
+  const spts    = document.getElementById('s-pts');
+  const sphotos = document.getElementById('s-photos');
+  if(sfarmer)  sfarmer.textContent  = f.name;
+  if(scode)    scode.textContent    = plotCode;
+  if(sname2)   sname2.textContent   = f.name;
+  if(svillage) svillage.textContent = f.village;
+  if(spts)     spts.textContent     = geotagPoints.length+' GPS points';
+  if(sphotos)  sphotos.textContent  = photoUrls.length+' photos uploaded';
+
+  refreshDashboardStats();
+  hideConfirm();
   goTo('s-success');
 }
 
