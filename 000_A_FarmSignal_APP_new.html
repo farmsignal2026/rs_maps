@@ -2630,9 +2630,13 @@ async function loadPreviewPhotos(plotNo){
   if(!section) return;
   section.style.display = 'none';
   try {
-    const {data, error} = await _sb.from('field_photos')
-      .select('source').eq('plot_no', plotNo).limit(1);
-    if(!error && data && data.length) section.style.display = 'block';
+    // Check field_photos table
+    const {data:fp} = await _sb.from('field_photos').select('source').eq('plot_no', plotNo).limit(1);
+    // Also check scout_reports for photo_urls
+    const {data:sr} = await _sb.from('scout_reports').select('photo_urls').eq('plot_no', plotNo).not('photo_urls','is',null).limit(1);
+    if((fp && fp.length) || (sr && sr.length && sr[0].photo_urls && sr[0].photo_urls.length)){
+      section.style.display = 'block';
+    }
   } catch(e){}
 }
 
@@ -2650,26 +2654,48 @@ async function showPhotoPopup(source){
   grid.innerHTML    = '<div style="color:#9fd8ae;font-size:12px;padding:20px;text-align:center;grid-column:1/-1">Loading...</div>';
   popup.style.display = 'flex';
   try {
+    // Try field_photos table first
     const {data, error} = await _sb.from('field_photos')
       .select('storage_path,taken_at')
       .eq('plot_no', f.code)
       .eq('source', source)
       .order('taken_at', {ascending:false})
       .limit(20);
-    if(error) throw error;
-    if(!data || !data.length){
+
+    let photos = [];
+
+    if(!error && data && data.length){
+      photos = data.map(p=>({
+        url: SB_URL+'/storage/v1/object/public/field-photos/'+p.storage_path,
+        date: p.taken_at ? new Date(p.taken_at).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}) : ''
+      }));
+    }
+
+    // For scout photos also check scout_reports.photo_urls as fallback
+    if(!photos.length && source === 'scout'){
+      const {data:sr} = await _sb.from('scout_reports')
+        .select('photo_urls,visit_date')
+        .eq('plot_no', f.code)
+        .not('photo_urls', 'is', null)
+        .order('visit_date', {ascending:false});
+      if(sr && sr.length){
+        sr.forEach(r=>{
+          const date = r.visit_date ? new Date(r.visit_date).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}) : '';
+          (r.photo_urls||[]).forEach(url=> photos.push({url, date}));
+        });
+      }
+    }
+
+    if(!photos.length){
       grid.innerHTML = '<div style="color:#9fd8ae;font-size:12px;padding:40px;text-align:center;grid-column:1/-1">No ' + source + ' photos yet for this plot.</div>';
       return;
     }
-    grid.innerHTML = data.map(p=>{
-      const url  = SB_URL+'/storage/v1/object/public/field-photos/'+p.storage_path;
-      const date = p.taken_at ? new Date(p.taken_at).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}) : '';
-      return '<div style="border-radius:10px;overflow:hidden;background:#1a3a2a;cursor:pointer" onclick="window.open(\''+url+'\',\'_blank\')">'
-        +'<img src="'+url+'" loading="lazy" style="width:100%;aspect-ratio:4/3;object-fit:cover;display:block" onerror="this.style.display=\'none\'">'
-        +'<div style="padding:5px 8px">'
-        +'<div style="color:#9fd8ae;font-size:10px;font-weight:600">'+date+'</div>'
-        +'</div></div>';
-    }).join('');
+    grid.innerHTML = photos.map(p=>
+      '<div style="border-radius:10px;overflow:hidden;background:#1a3a2a;cursor:pointer" onclick="window.open(\''+p.url+'\',\'_blank\')">'
+      +'<img src="'+p.url+'" loading="lazy" style="width:100%;aspect-ratio:4/3;object-fit:cover;display:block" onerror="this.style.display=\'none\'">'
+      +'<div style="padding:5px 8px"><div style="color:#9fd8ae;font-size:10px;font-weight:600">'+p.date+'</div></div>'
+      +'</div>'
+    ).join('');
   } catch(e){
     grid.innerHTML = '<div style="color:#f87171;font-size:12px;padding:20px;text-align:center;grid-column:1/-1">Could not load photos.</div>';
   }
