@@ -2802,7 +2802,7 @@ let geotagPolyline  = null;   // preview polygon outline
 let geotagLocMarker = null;   // live GPS dot
 let geotagWatchId   = null;   // geolocation watch
 let geotagCurrentPos= null;   // {lat,lng,acc}
-let geotagMapLayer  = 'osm';  // 'osm' or 'esri'
+let geotagMapLayer  = 'esri';  // default to satellite for field boundary capture
 
 const GEOTAG_ACC_GATE  = 10;   // metres -- reject points worse than this
 const GEOTAG_MIN_DIST  = 3;    // metres -- reject points too close together
@@ -2839,30 +2839,37 @@ function setMapLayer(type){
   geotagMapLayer = type;
   if(!geotagMap) return;
 
-  if(geotagLayer){ geotagMap.removeLayer(geotagLayer); }
+  if(geotagLayer){ geotagMap.removeLayer(geotagLayer); geotagLayer = null; }
 
   if(type === 'esri'){
+    // ESRI World Imagery -- free satellite tiles, no API key required
     geotagLayer = L.tileLayer(
       'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-      {maxZoom:19}
-    ).addTo(geotagMap);
+      {maxZoom:19, attribution:'Esri World Imagery', crossOrigin:''}
+    );
   } else {
     geotagLayer = L.tileLayer(
       'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-      {maxZoom:19}
-    ).addTo(geotagMap);
+      {maxZoom:19, attribution:'OpenStreetMap'}
+    );
   }
+  geotagLayer.addTo(geotagMap);
+  geotagLayer.bringToBack();
 
-  // Update toggle buttons
-  const osm  = document.getElementById('layer-osm-btn');
-  const esri = document.getElementById('layer-esri-btn');
-  if(osm && esri){
-    if(type==='osm'){
-      osm.style.background  = 'rgba(255,255,255,0.25)'; osm.style.color='#fff';
-      esri.style.background = 'transparent'; esri.style.color='rgba(255,255,255,0.6)';
+  // Update toggle button styles
+  const osmBtn  = document.getElementById('layer-osm-btn');
+  const esriBtn = document.getElementById('layer-esri-btn');
+  if(osmBtn && esriBtn){
+    const activeStyle  = 'rgba(255,255,255,0.3)';
+    const inactiveStyle = 'transparent';
+    const activeColor  = '#fff';
+    const inactiveColor = 'rgba(255,255,255,0.55)';
+    if(type === 'esri'){
+      esriBtn.style.background = activeStyle;  esriBtn.style.color = activeColor;
+      osmBtn.style.background  = inactiveStyle; osmBtn.style.color = inactiveColor;
     } else {
-      esri.style.background = 'rgba(255,255,255,0.25)'; esri.style.color='#fff';
-      osm.style.background  = 'transparent'; osm.style.color='rgba(255,255,255,0.6)';
+      osmBtn.style.background  = activeStyle;  osmBtn.style.color = activeColor;
+      esriBtn.style.background = inactiveStyle; esriBtn.style.color = inactiveColor;
     }
   }
 }
