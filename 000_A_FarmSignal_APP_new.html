@@ -7386,6 +7386,30 @@ function renderSurveyAlerts() {
   }).join('');
 }
 
+// Entry point used by geofenced Map access + Field Preview "Survey" button.
+// Resolves which stage to open for a field (by index into `fields`) and
+// launches openSurveyForm() for it -- this is what dp-survey-btn / the
+// Field Preview Survey button / launchScoutOrSurvey('survey') rely on.
+function startSurveyForField(idx) {
+  const f = fields[idx];
+  if(!f) { alert('Field not found.'); return; }
+  if(!f.mapped) {
+    alert('This field has no GPS boundary yet.\nPlease GeoTag the field first before surveying.');
+    screenHistory=[]; goTo('s-fields');
+    return;
+  }
+  const stages = getSurveyStages(f);
+  if(!stages.length) {
+    alert(f.name+' ('+f.code+') has no active survey window right now\nbased on its current crop age.');
+    screenHistory=[]; goTo('s-survey-alerts'); renderSurveyAlerts();
+    return;
+  }
+  // Prefer an overdue/unattended/scheduled stage; fall back to the first
+  // stage even if already surveyed (lets officer re-open the latest one).
+  const target = stages.find(s=>s.status!=='surveyed') || stages[0];
+  openSurveyForm(f.code, target.key);
+}
+
 function openSurveyForm(code, stageKey) {
   const f = getFieldByCode(code);
   const stage = SURVEY_STAGES.find(s=>s.key===stageKey);
