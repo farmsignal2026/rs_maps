@@ -2326,47 +2326,29 @@ function getScopedFields() {
   if(!currentUser) return [];
   const u = currentUser;
 
-  // Admin and manager see all (or all in their factory)
+  // Admin sees everything
   if(u.role === 'admin') return ALL_FIELDS;
 
+  // Manager sees all plots in their factory (no division filter)
   if(u.role === 'manager'){
     if(!u.factory_code) return ALL_FIELDS;
-    return ALL_FIELDS.filter(f =>
-      (f.factory||'').toUpperCase() === u.factory_code.toUpperCase() ||
-      (f.factory||'').toUpperCase().includes(u.factory_code.toUpperCase())
-    );
+    return ALL_FIELDS.filter(f => f.factoryCode === u.factory_code);
   }
 
-  // Officer / viewer — scope by factory + division_codes
+  // Officer / viewer — filter by factory + exact division codes
   if(u.role === 'officer' || u.role === 'viewer'){
     let scoped = ALL_FIELDS;
 
     // Filter by factory
     if(u.factory_code){
-      const fc = u.factory_code.toUpperCase();
-      scoped = scoped.filter(f =>
-        (f.factory||'').toUpperCase().includes(fc) ||
-        (f.factoryCode||'').toUpperCase() === fc
-      );
+      scoped = scoped.filter(f => f.factoryCode === u.factory_code);
     }
 
-    // Filter by division_codes (from officer_divisions table)
+    // Filter by division_codes array (exact code match against f.divisionCode)
     const divCodes = u.division_codes || [];
     if(divCodes.length > 0){
-      // Build a set of division NAMES from codes for matching
-      // e.g. MDP-KOLIYANUR → match field.division containing "Koliyanur"
-      const divNames = divCodes.map(code => {
-        const parts = code.split('-');
-        return parts.slice(1).join('-').toLowerCase().replace(/-/g,' ');
-      });
-      scoped = scoped.filter(f => {
-        const fdiv = (f.division||'').toLowerCase();
-        const fcode = (f.divisionCode||f.division_code||'').toLowerCase();
-        return divNames.some(dn =>
-          fdiv.includes(dn) || dn.includes(fdiv) ||
-          divCodes.some(dc => dc.toLowerCase() === fcode)
-        );
-      });
+      const codeSet = new Set(divCodes.map(c => c.toUpperCase()));
+      scoped = scoped.filter(f => codeSet.has((f.divisionCode||'').toUpperCase()));
     }
     return scoped;
   }
@@ -5048,6 +5030,7 @@ async function resolveLatestFileURLs(){
   }
 }
 let fieldDataLoaded=false;
+let divCodeMap = {}; // division_code -> name, built during Supabase load
 
 // Parses a planting date from the GeoJSON's DOP property -- handles a
 // plain ISO/locale date string, or an Excel serial number (in case it
@@ -5220,17 +5203,19 @@ async function loadFieldDataFromSupabase(){
       const ndviInfo = ndviByPlot[pid];
 
       const field = {
-        name:     farmer ? farmer.name : 'Unknown',
-        code:     pid,
-        factory:  facMap[p.factory_code] || p.factory_code || '',
-        division: divMap[p.division_code] || p.division_code || '',
-        section:  secMap[p.section_code]  || p.section_code  || '',
-        village:  vilMap[p.village_code]  || p.village_code  || '',
-        area:     p.area_acres ? String(p.area_acres) : '',
-        variety:  p.variety_name || '',
-        type:     p.plot_type   || '',
-        cropType: p.crop_type   || '',
-        date:     plantDate
+        name:          farmer ? farmer.name : 'Unknown',
+        code:          pid,
+        factory:       facMap[p.factory_code] || p.factory_code || '',
+        factoryCode:   p.factory_code || '',
+        division:      divMap[p.division_code] || p.division_code || '',
+        divisionCode:  p.division_code || '',
+        section:       secMap[p.section_code]  || p.section_code  || '',
+        village:       vilMap[p.village_code]  || p.village_code  || '',
+        area:          p.area_acres ? String(p.area_acres) : '',
+        variety:       p.variety_name || '',
+        type:          p.plot_type   || '',
+        cropType:      p.crop_type   || '',
+        date:          plantDate
           ? plantDate.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})
           : '',
         soil: '', phone: farmer ? (farmer.phone||'') : '',
@@ -5701,10 +5686,10 @@ async function doLogin() {
 
     btn.innerHTML = '<i class="ti ti-loader-2" style="font-size:18px"></i> Loading field data...';
 
-    // Fetch officer profile
+    // Fetch officer profile (include id for officer_divisions lookup)
     const { data: officers, error: offErr } = await _sb
       .from('farm_officers')
-      .select('name,role,factory_code,division_code,phone')
+      .select('id,name,role,factory_code,division_code,phone')
       .eq('auth_user_id', authData.user.id)
       .eq('is_active', true)
       .limit(1);
@@ -5714,17 +5699,20 @@ async function doLogin() {
 
     const officer = officers[0];
 
-    // Fetch all division codes from officer_divisions table (multi-division support)
+    // Fetch all assigned divisions from officer_divisions (multi-division support)
     let divisionCodes = [];
     if(officer.role === 'officer' || officer.role === 'viewer'){
-      const {data:odRows} = await _sb
+      const {data:odRows, error:odErr} = await _sb
         .from('officer_divisions')
         .select('division_code')
-        .eq('officer_id', (await _sb.from('farm_officers').select('id').eq('auth_user_id', authData.user.id).limit(1)).data[0].id);
-      if(odRows && odRows.length){
+        .eq('officer_id', officer.id);
+      if(!odErr && odRows && odRows.length){
         divisionCodes = odRows.map(r => r.division_code);
+        console.log('Division codes from officer_divisions:', divisionCodes);
       } else if(officer.division_code){
+        // Fallback to single division_code in farm_officers
         divisionCodes = [officer.division_code];
+        console.log('Division code from farm_officers:', divisionCodes);
       }
     }
 
