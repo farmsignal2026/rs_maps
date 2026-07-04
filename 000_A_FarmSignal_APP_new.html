@@ -2722,6 +2722,9 @@ function populateFieldFilters() {
   const cropSel = document.getElementById('filter-croptype');
   if(!factorySel || !divisionSel || !cropSel) return;
 
+  console.log('populateFieldFilters: fields.length=', fields.length,
+    'divisions:', [...new Set(fields.map(f=>f.divisionCode).filter(Boolean))]);
+
   const fill = (sel, values, allLabel) => {
     const prev = sel.value;
     sel.innerHTML = `<option value="">${allLabel}</option>` +
@@ -2733,9 +2736,13 @@ function populateFieldFilters() {
   const allFactories=[...new Set(fields.map(f=>f.factory).filter(Boolean))].sort();
   fill(factorySel, allFactories, 'All Clients');
 
-  // Division -- cascades from the selected factory, so picking a mill
-  // only shows the divisions that actually belong to it.
-  const selectedFactory=factorySel.value;
+  // Auto-select factory if officer is scoped to one factory
+  if(currentUser && currentUser.factory_code && allFactories.length === 1){
+    factorySel.value = allFactories[0];
+  }
+
+  // Division -- cascades from the selected factory
+  const selectedFactory = factorySel.value;
   const divScope = selectedFactory ? fields.filter(f=>f.factory===selectedFactory) : fields;
   const divisions=[...new Set(divScope.map(f=>f.division).filter(Boolean))].sort();
   fill(divisionSel, divisions, 'All Divisions');
