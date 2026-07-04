@@ -1586,10 +1586,10 @@ body {
       <div style="position:relative;margin-bottom:10px">
         <i class="ti ti-search" style="position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:14px;color:#888780;pointer-events:none"></i>
         <input id="planner-search" type="text" placeholder="Search village, farmer, plot no…"
-          oninput="renderScoutAlerts()"
+          oninput="renderPlannerList()"
           style="width:100%;padding:9px 32px 9px 34px;border-radius:10px;border:1px solid #D3D1C7;
           font-size:12px;background:#fff;color:#2C2C2A;outline:none;font-family:inherit"/>
-        <button id="planner-search-clear" onclick="document.getElementById('planner-search').value='';renderScoutAlerts()"
+        <button id="planner-search-clear" onclick="document.getElementById('planner-search').value='';renderPlannerList()"
           style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);
           background:none;border:none;cursor:pointer;font-size:14px;color:#888780;padding:2px">
           <i class="ti ti-x"></i>
@@ -1599,7 +1599,7 @@ body {
       <!-- Calendar strip -->
       <div style="background:#fff;border-radius:12px;border:1px solid #e8e4da;padding:10px 12px;margin-bottom:10px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <span style="font-size:12px;font-weight:600;color:#444441">Scout Calendar · <span id="scout-calendar-hdr">Jul 2026</span></span>
+          <span style="font-size:12px;font-weight:600;color:#444441"><span id="planner-calendar-label">Scout Calendar</span> · <span id="scout-calendar-hdr">Jul 2026</span></span>
           <span style="font-size:10px;color:#888780">15-day window</span>
         </div>
         <div style="display:flex;gap:4px;overflow-x:auto;padding-bottom:4px" id="scout-calendar-strip"></div>
@@ -1614,7 +1614,7 @@ body {
       <div id="scout-summary-cards" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:10px"></div>
 
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <span style="font-size:12px;font-weight:600;color:#994800;text-transform:uppercase;letter-spacing:0.04em"><i class="ti ti-alert-triangle" style="font-size:13px"></i> Pending Scouts</span>
+        <span style="font-size:12px;font-weight:600;color:#994800;text-transform:uppercase;letter-spacing:0.04em"><i class="ti ti-alert-triangle" style="font-size:13px" id="planner-list-icon"></i> <span id="planner-list-label">Pending Scouts</span></span>
         <span style="font-size:11px;color:#888780" id="scout-pending-count"></span>
       </div>
 
@@ -4468,8 +4468,13 @@ function setPlannerTab(tab){
     sv.style.borderBottomColor = tab==='survey' ? '#FFE0B8' : 'transparent';
     sv.style.fontWeight = tab==='survey' ? '700' : '600';
   }
-  if(tab==='scout')  renderScoutAlerts();
-  else               renderSurveyAlerts();
+  renderPlannerList();
+}
+// Dispatches to whichever tab (Scout/Survey) is currently active -- used by
+// the shared search bar and its clear button so both tabs stay searchable.
+function renderPlannerList(){
+  if(plannerTab==='scout') renderScoutAlerts();
+  else                     renderSurveyAlerts();
 }
 let scheduleModalIdx = null;
 
@@ -4575,6 +4580,8 @@ function renderCalendar() {
   // Update month/year header
   const hdr = document.getElementById('scout-calendar-hdr');
   if(hdr) hdr.textContent = MONTH_NAMES[today.getMonth()] + ' ' + today.getFullYear();
+  const calLbl = document.getElementById('planner-calendar-label');
+  if(calLbl) calLbl.textContent = 'Scout Calendar';
 
   // Build dotMap from real scoutByPlot data
   const dotMap = {};
@@ -4676,6 +4683,10 @@ function renderScoutAlerts() {
   // List label
   const lbl = scoutFilter==='all' ? `All · ${attn.length}` : `${STATUS_CFG[scoutFilter].label} · ${counts[scoutFilter]}`;
   document.getElementById('scout-pending-count').textContent = lbl + ' fields';
+  const plLbl = document.getElementById('planner-list-label');
+  if(plLbl) plLbl.textContent = 'Pending Scouts';
+  const plIcon = document.getElementById('planner-list-icon');
+  if(plIcon) plIcon.className = 'ti ti-alert-triangle';
   const li = document.getElementById('list-label-icon');
   if(li && scoutFilter!=='all') li.className = 'ti '+STATUS_CFG[scoutFilter].icon;
 
@@ -7245,34 +7256,56 @@ function handleSurveyScheduleConfirm(val) {
 }
 
 function renderSurveyCalendar() {
-  const days    = ['10','11','12','13','14','15','16','17','18','19','20','21','22','23'];
-  const dayNames= ['Sat','Sun','Mon','Tue','Wed','Thu','Fri','Sat','Sun','Mon','Tue','Wed','Thu','Fri'];
-  const dotMap  = {};
+  const today = new Date();
+  const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  // Build 15-day array starting today (same window as Scout)
+  const days = [];
+  for(let i=0; i<15; i++){
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    days.push({
+      dateStr: d.toISOString().slice(0,10),
+      d:       String(d.getDate()).padStart(2,'0'),
+      day:     DAY_NAMES[d.getDay()],
+      isToday: i===0
+    });
+  }
+
+  // Header + label
+  const hdr = document.getElementById('scout-calendar-hdr');
+  if(hdr) hdr.textContent = MONTH_NAMES[today.getMonth()] + ' ' + today.getFullYear();
+  const calLbl = document.getElementById('planner-calendar-label');
+  if(calLbl) calLbl.textContent = 'Survey Calendar';
+
+  // Build dotMap from real surveyDB scheduled/overdue dates within the window
+  const dotMap = {};
   getSurveyFields().forEach(f => {
     getSurveyStages(f).forEach(s => {
-      if(s.db.scheduledDate && s.status!=='surveyed') {
-        const d = String(new Date(s.db.scheduledDate).getDate()).padStart(2,'0');
-        if(days.includes(d)) { dotMap[d]=dotMap[d]||[]; dotMap[d].push(s.status); }
+      if(s.db.scheduledDate && s.status!=='surveyed'){
+        const key = s.db.scheduledDate.slice(0,10);
+        dotMap[key] = dotMap[key] || [];
+        dotMap[key].push(s.status);
       }
     });
   });
-  const el = document.getElementById('survey-calendar-strip');
+
+  const el = document.getElementById('scout-calendar-strip');
   if(!el) return;
-  el.innerHTML = days.map((d,i)=>{
-    const isToday=d==='10';
-    const dots=dotMap[d]||[];
-    const hasOver=dots.includes('overdue');
-    const hasSched=dots.includes('scheduled');
-    return `<div style="flex-shrink:0;width:38px;border-radius:8px;padding:5px 2px;text-align:center;cursor:pointer;
-      background:${isToday?'#0C447C':hasOver?'#fde8e8':hasSched?'#dbeafe':'#F8F7F4'};
-      border:1px solid ${isToday?'#0C447C':hasOver?'#f5a0a0':hasSched?'#93c5fd':'#e8e4da'}">
-      <div style="font-size:9px;color:${isToday?'#85B7EB':'#888780'}">${dayNames[i]}</div>
-      <div style="font-size:13px;font-weight:700;color:${isToday?'#fff':hasOver?'#a00000':hasSched?'#1d4ed8':'#444441'}">${d}</div>
-      <div style="height:7px;display:flex;align-items:center;justify-content:center;gap:2px">
-        ${hasSched?'<div style="width:5px;height:5px;background:#185FA5;border-radius:50%"></div>':''}
-        ${hasOver?'<div style="width:5px;height:5px;background:#a00000;border-radius:50%"></div>':''}
-      </div>
-    </div>`;
+  el.innerHTML = days.map(x => {
+    const dots    = dotMap[x.dateStr] || [];
+    const hasOver = dots.includes('overdue');
+    const hasSched= dots.includes('scheduled');
+    return '<div style="flex-shrink:0;width:38px;border-radius:8px;padding:5px 2px;text-align:center;cursor:pointer;'
+      +'background:'+(x.isToday?'#0C447C':hasOver?'#fde8e8':hasSched?'#dbeafe':'#F8F7F4')+';'
+      +'border:1px solid '+(x.isToday?'#0C447C':hasOver?'#f5a0a0':hasSched?'#93c5fd':'#e8e4da')+'">'
+      +'<div style="font-size:9px;color:'+(x.isToday?'#85B7EB':'#888780')+'">'+x.day+'</div>'
+      +'<div style="font-size:13px;font-weight:700;color:'+(x.isToday?'#fff':hasOver?'#a00000':hasSched?'#1d4ed8':'#444441')+'">'+parseInt(x.d)+'</div>'
+      +'<div style="height:7px;display:flex;align-items:center;justify-content:center;gap:2px">'
+      +(hasSched?'<div style="width:5px;height:5px;background:#185FA5;border-radius:50%"></div>':'')
+      +(hasOver?'<div style="width:5px;height:5px;background:#a00000;border-radius:50%"></div>':'')
+      +'</div></div>';
   }).join('');
 }
 
@@ -7288,38 +7321,74 @@ function renderSurveyAlerts() {
     });
   });
 
-  const dot = document.getElementById('survey-alert-dot');
+  // Subtitle — scoped like Scout's, but describes the survey scope
+  const sub = document.getElementById('scout-alerts-sub');
+  if(sub){
+    const scope = currentUser && currentUser.factory_code
+      ? currentUser.factory_code + (currentUser.division_codes && currentUser.division_codes.length === 1
+          ? ' · ' + (currentUser.division_codes[0].split('-').slice(1).join(' ')) : '')
+      : 'All Factories';
+    sub.textContent = 'All mapped fields · by crop stage · ' + scope;
+  }
+
+  // Shared alert-dot badge (bottom nav) — reflects whichever tab is active
+  const dot = document.getElementById('scout-alert-dot');
   if(dot) dot.textContent = counts.unattended + counts.overdue;
 
-  // Summary cards
-  const cardsEl = document.getElementById('survey-summary-cards');
-  if(cardsEl) cardsEl.innerHTML = Object.entries(SURVEY_STATUS_CFG).map(([key,c])=>`
-    <div onclick="setsurveyFilter('${key}')" style="flex-shrink:0;min-width:60px;background:${c.bg};
-      border:2px solid ${surveyFilter===key?c.col:c.border};border-radius:10px;padding:8px 6px;
-      text-align:center;cursor:pointer;transition:all 0.15s;
-      ${surveyFilter===key?'transform:scale(1.05);box-shadow:0 2px 8px rgba(0,0,0,0.1)':''}">
-      <div style="font-size:20px;font-weight:700;color:${c.col};line-height:1">${counts[key]}</div>
-      <div style="font-size:8.5px;font-weight:600;color:${c.col};margin-top:3px;line-height:1.3">
-        <i class="ti ${c.icon}" style="font-size:9px;display:block;margin-bottom:1px"></i>${c.label}
-      </div>
-    </div>`).join('');
+  // Summary cards — same container as Scout
+  const cardsEl = document.getElementById('scout-summary-cards');
+  if(cardsEl){
+    cardsEl.style.display = 'flex';
+    cardsEl.style.gap = '5px';
+    cardsEl.style.overflowX = 'auto';
+    cardsEl.style.paddingBottom = '4px';
+    cardsEl.innerHTML = Object.entries(SURVEY_STATUS_CFG).map(([key,c])=>`
+      <div onclick="setsurveyFilter('${key}')" style="flex-shrink:0;min-width:60px;background:${c.bg};
+        border:2px solid ${surveyFilter===key?c.col:c.border};border-radius:10px;padding:8px 6px;
+        text-align:center;cursor:pointer;transition:all 0.15s;
+        ${surveyFilter===key?'transform:scale(1.05);box-shadow:0 2px 8px rgba(0,0,0,0.1)':''}">
+        <div style="font-size:20px;font-weight:700;color:${c.col};line-height:1">${counts[key]}</div>
+        <div style="font-size:8.5px;font-weight:600;color:${c.col};margin-top:3px;line-height:1.3">
+          <i class="ti ${c.icon}" style="font-size:9px;display:block;margin-bottom:1px"></i>${c.label}
+        </div>
+      </div>`).join('');
+  }
+
+  // Pending-list header — relabeled for Survey
+  const plLbl = document.getElementById('planner-list-label');
+  if(plLbl) plLbl.textContent = 'Survey Fields';
+  const plIcon = document.getElementById('planner-list-icon');
+  if(plIcon) plIcon.className = 'ti ti-clipboard-check';
 
   // Filter fields — show field if it has at least one matching stage
   let filtered = surveyFilter==='all' ? allFields :
     allFields.filter(f => getSurveyStages(f).some(s=>s.status===surveyFilter));
 
-  const countEl = document.getElementById('survey-list-count');
+  // Apply the shared search bar
+  const searchQ = (document.getElementById('planner-search')||{value:''}).value.trim().toLowerCase();
+  const clearBtn = document.getElementById('planner-search-clear');
+  if(clearBtn) clearBtn.style.display = searchQ ? 'block' : 'none';
+  if(searchQ){
+    filtered = filtered.filter(f=>
+      f.name.toLowerCase().includes(searchQ) ||
+      f.village.toLowerCase().includes(searchQ) ||
+      f.code.toLowerCase().includes(searchQ) ||
+      (f.division||'').toLowerCase().includes(searchQ)
+    );
+  }
+
+  const countEl = document.getElementById('scout-pending-count');
   if(countEl) countEl.textContent = filtered.length + ' fields';
 
   if(!filtered.length) {
-    document.getElementById('survey-alert-list').innerHTML=`
+    document.getElementById('scout-alert-list').innerHTML=`
       <div style="text-align:center;padding:28px;color:#888780">
         <i class="ti ti-circle-check" style="font-size:28px;display:block;margin-bottom:6px;color:#b8e07a"></i>
         <div style="font-size:13px;font-weight:500">No surveys in this category</div>
       </div>`; return;
   }
 
-  document.getElementById('survey-alert-list').innerHTML = filtered.map(f => {
+  document.getElementById('scout-alert-list').innerHTML = filtered.map(f => {
     const stages = getSurveyStages(f);
     // Show only stages matching filter (or all if filter=all)
     const visStages = surveyFilter==='all' ? stages : stages.filter(s=>s.status===surveyFilter);
@@ -7401,7 +7470,7 @@ function startSurveyForField(idx) {
   const stages = getSurveyStages(f);
   if(!stages.length) {
     alert(f.name+' ('+f.code+') has no active survey window right now\nbased on its current crop age.');
-    screenHistory=[]; goTo('s-survey-alerts'); renderSurveyAlerts();
+    screenHistory=[]; goTo('s-scout-alerts'); setPlannerTab('survey');
     return;
   }
   // Prefer an overdue/unattended/scheduled stage; fall back to the first
@@ -7503,7 +7572,7 @@ function submitSurvey() {
   const sf = getFieldByCode(surveyState.fieldCode);
   const nextPending = getSurveyStages(sf).find(s=>s.status!=='surveyed');
   alert(`✅ ${stage.label} Survey submitted for ${sf?.name}!${nextPending?'\n\nNext pending: '+nextPending.label+' Stage':'\n\nAll surveys complete!'}`);
-  screenHistory=[]; goTo('s-survey-alerts'); renderSurveyAlerts();
+  screenHistory=[]; goTo('s-scout-alerts'); setPlannerTab('survey');
 }
 
 
