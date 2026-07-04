@@ -1406,7 +1406,7 @@ body {
       <div style="background:#fff;border-radius:12px;border:1px solid #e8e4da;padding:10px 12px;margin-bottom:10px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">
           <span style="font-size:12px;font-weight:600;color:#444441"><i class="ti ti-satellite" style="font-size:13px;color:#185FA5"></i> Factory Crop Health</span>
-          <span style="font-size:9px;color:#888780">Sentinel-2 · 08 May 2026</span>
+          <span style="font-size:9px;color:#888780" id="factory-health-date">Latest</span>
         </div>
         <div id="factory-health-bar" style="height:12px;border-radius:6px;overflow:hidden;display:flex;margin-bottom:6px"></div>
         <div id="factory-health-legend" style="display:flex;gap:10px;font-size:10px"></div>
@@ -1415,10 +1415,25 @@ body {
       <!-- Scout progress across factory -->
       <div style="background:#fff;border-radius:12px;border:1px solid #e8e4da;padding:10px 12px;margin-bottom:10px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <span style="font-size:12px;font-weight:600;color:#444441"><i class="ti ti-binoculars" style="font-size:13px;color:#8B4500"></i> Scout Workflow Status</span>
+          <span style="font-size:12px;font-weight:600;color:#444441"><i class="ti ti-binoculars" style="font-size:13px;color:#8B4500"></i> Scout Status</span>
+          <span style="font-size:9px;color:#888780" id="factory-scout-date"></span>
         </div>
         <div id="factory-scout-bar" style="height:10px;border-radius:5px;overflow:hidden;display:flex;margin-bottom:6px"></div>
         <div id="factory-scout-legend" style="display:flex;gap:8px;font-size:10px;flex-wrap:wrap"></div>
+      </div>
+
+      <!-- Division filter -->
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <select id="fd-filter-mill" onchange="renderFactoryDash()"
+          style="flex:1;padding:7px 8px;border-radius:8px;border:1px solid #D3D1C7;
+          font-size:11px;color:#2C2C2A;background:#fff;outline:none">
+          <option value="">All Mills</option>
+        </select>
+        <select id="fd-filter-division" onchange="renderFactoryDash()"
+          style="flex:1;padding:7px 8px;border-radius:8px;border:1px solid #D3D1C7;
+          font-size:11px;color:#2C2C2A;background:#fff;outline:none">
+          <option value="">All Divisions</option>
+        </select>
       </div>
 
       <!-- Division list -->
@@ -2012,7 +2027,7 @@ function roleToLandingScreen(role){
 }
 function roleToLabel(role,factory_code){
   if(role==='admin')   return 'Administrator';
-  if(role==='manager') return factory_code ? 'Super User · '+factory_code : 'Super User · All Factories';
+  if(role==='manager') return factory_code ? 'Super User · '+factory_code : 'Executive View';
   if(role==='officer') return 'Field Officer';
   if(role==='viewer')  return 'Viewer';
   return role;
@@ -7266,33 +7281,73 @@ function submitSurvey() {
 // DIVISIONS is now computed dynamically from real fields data in renderFactoryDash()
 
 function renderFactoryDash() {
-  // Build DIVISIONS dynamically from real Supabase-loaded fields
+  const filterMill = (document.getElementById('fd-filter-mill')||{}).value || '';
+  const filterDiv  = (document.getElementById('fd-filter-division')||{}).value || '';
+
+  const allFields = fields.length ? fields : ALL_FIELDS;
   const divMap = {};
-  (fields.length ? fields : ALL_FIELDS).forEach((f,i)=>{
+
+  allFields.forEach((f,i)=>{
+    if(filterMill && f.factory !== filterMill) return;
+    if(filterDiv  && f.division !== filterDiv)  return;
     const divName = f.division || 'Unknown';
     if(!divMap[divName]) divMap[divName]={
-      name: divName, totalPlots:0, mapped:0, sections:new Set(), villages:new Set(),
-      health:{good:0, optimal:0, attention:0, serious:0},
+      name:divName, factory:f.factory||'', totalPlots:0, mapped:0,
+      sections:new Set(), villages:new Set(),
+      health:{good:0, optimal:0, attention:0},
       scout:{unattended:0, scheduled:0, scouted:0, overdue:0, closed:0},
       ndviSum:0, ndviCount:0, prevNdviSum:0, prevNdviCount:0,
-      alertCount:0
+      latestDate:null, alertCount:0
     };
     const d = divMap[divName];
     d.totalPlots++;
     if(f.mapped) d.mapped++;
     if(f.section) d.sections.add(f.section);
     if(f.village) d.villages.add(f.village);
-    // Health from fieldGeoData
     const geo = fieldGeoData[i];
     if(geo && geo.healthStatus){
-      if(geo.healthStatus==='good')     d.health.good++;
-      else if(geo.healthStatus==='optimal'||geo.healthStatus==='moderate') d.health.optimal++;
-      else if(geo.healthStatus==='serious') { d.health.attention++; d.alertCount++; }
+      if(geo.healthStatus==='good')           d.health.good++;
+      else if(geo.healthStatus==='moderate')  d.health.optimal++;
+      else if(geo.healthStatus==='serious')   { d.health.attention++; d.alertCount++; }
       else if(geo.healthStatus==='attention') d.health.attention++;
       if(geo.ndvi!=null){ d.ndviSum+=geo.ndvi; d.ndviCount++; }
       if(geo.prevNdvi!=null){ d.prevNdviSum+=geo.prevNdvi; d.prevNdviCount++; }
+      if(geo.lastFetch && (!d.latestDate || geo.lastFetch > d.latestDate))
+        d.latestDate = geo.lastFetch;
+    }
+    // Real scout counts from scoutByPlot
+    const sr = scoutByPlot[f.code] || [];
+    if(sr.length){
+      const today = new Date().toISOString().slice(0,10);
+      const last  = sr[0];
+      if(last.follow_up_required && last.follow_up_date && last.follow_up_date < today)
+        d.scout.overdue++;
+      else if(last.follow_up_required && last.follow_up_date >= today)
+        d.scout.scouted++;
+      else d.scout.closed++;
+    } else if(geo && (geo.healthStatus==='attention'||geo.healthStatus==='serious')){
+      d.scout.unattended++;
     }
   });
+
+  // Populate mill dropdown
+  const millSel = document.getElementById('fd-filter-mill');
+  if(millSel){
+    const mills = [...new Set(allFields.map(f=>f.factory).filter(Boolean))].sort();
+    const prev = millSel.value;
+    millSel.innerHTML = '<option value="">All Mills</option>'
+      + mills.map(m=>'<option value="'+m+'"'+(m===prev?' selected':'')+'>'+m+'</option>').join('');
+  }
+
+  // Populate division dropdown (cascades from mill)
+  const divSel = document.getElementById('fd-filter-division');
+  if(divSel){
+    const src = filterMill ? allFields.filter(f=>f.factory===filterMill) : allFields;
+    const divs = [...new Set(src.map(f=>f.division).filter(Boolean))].sort();
+    const prev = divSel.value;
+    divSel.innerHTML = '<option value="">All Divisions</option>'
+      + divs.map(d=>'<option value="'+d+'"'+(d===prev?' selected':'')+'>'+d+'</option>').join('');
+  }
 
   const DIVISIONS = Object.values(divMap).sort((a,b)=>a.name.localeCompare(b.name));
   DIVISIONS.forEach(d=>{
@@ -7303,22 +7358,35 @@ function renderFactoryDash() {
     const diff = (avgNdvi!=null && prevNdvi!=null) ? avgNdvi - prevNdvi : 0;
     d.ndviTrend    = (diff>=0?'+':'')+diff.toFixed(2);
     d.ndviTrendDir = diff>=0 ? 'up' : 'down';
-    d.do = '';  // officer name — not yet in scope, show blank
   });
 
-  const totalPlots   = DIVISIONS.reduce((a,d)=>a+d.totalPlots,0);
-  const totalMapped  = DIVISIONS.reduce((a,d)=>a+d.mapped,0);
-  const mapPct       = totalPlots ? Math.round(totalMapped/totalPlots*100) : 0;
-  const totalGood    = DIVISIONS.reduce((a,d)=>a+d.health.good,0);
-  const totalOptimal = DIVISIONS.reduce((a,d)=>a+d.health.optimal,0);
+  const totalPlots     = DIVISIONS.reduce((a,d)=>a+d.totalPlots,0);
+  const totalMapped    = DIVISIONS.reduce((a,d)=>a+d.mapped,0);
+  const mapPct         = totalPlots ? Math.round(totalMapped/totalPlots*100) : 0;
+  const totalGood      = DIVISIONS.reduce((a,d)=>a+d.health.good,0);
+  const totalOptimal   = DIVISIONS.reduce((a,d)=>a+d.health.optimal,0);
   const totalAttention = DIVISIONS.reduce((a,d)=>a+d.health.attention,0);
-  const totalIndexed = totalGood+totalOptimal+totalAttention;
-  const scoutTotals  = {unattended:0,scheduled:0,scouted:0,overdue:0,closed:0};
+  const totalIndexed   = totalGood+totalOptimal+totalAttention;
+  const scoutTotals    = {unattended:0,scheduled:0,scouted:0,overdue:0,closed:0};
   DIVISIONS.forEach(d=>Object.keys(scoutTotals).forEach(k=>scoutTotals[k]+=d.scout[k]));
-  const totalScout   = Object.values(scoutTotals).reduce((a,b)=>a+b,0);
-  const totalAlerts  = DIVISIONS.reduce((a,d)=>a+d.alertCount,0);
+  const totalScout     = Object.values(scoutTotals).reduce((a,b)=>a+b,0);
+  const totalAlerts    = DIVISIONS.reduce((a,d)=>a+d.alertCount,0);
 
-  // Update bell badge
+  // Latest NDVI date
+  const latestDates = DIVISIONS.map(d=>d.latestDate).filter(Boolean).sort();
+  const latestDate  = latestDates.length ? latestDates[latestDates.length-1] : 'Latest';
+  const hdEl = document.getElementById('factory-health-date');
+  if(hdEl) hdEl.textContent = latestDate;
+
+  // Latest scout date
+  const allScouts = Object.values(scoutByPlot).flat();
+  const latestScout = allScouts.length
+    ? allScouts.sort((a,b)=>b.visit_date.localeCompare(a.visit_date))[0].visit_date : null;
+  const sdEl = document.getElementById('factory-scout-date');
+  if(sdEl) sdEl.textContent = latestScout
+    ? 'Last: '+new Date(latestScout).toLocaleDateString('en-GB',{day:'2-digit',month:'short'})
+    : 'No scouts yet';
+
   document.getElementById('notif-badge').textContent = totalAlerts;
 
   // KPI cards
