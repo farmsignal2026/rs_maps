@@ -753,7 +753,7 @@ body {
       <button class="back-btn" onclick="pendingScoutIdx=null; hideScoutBanner(); goBack()"><i class="ti ti-arrow-left"></i></button>
       <div style="flex:1">
         <h1 style="font-size:14px">Field Map</h1>
-        <div class="sub"><span id="map-field-count">–</span> mapped plots · Trichy Div</div>
+        <div class="sub"><span id="map-field-count">–</span> mapped plots · <span id="map-scope-label">All Factories</span></div>
       </div>
       <!-- SAT/ROAD toggle -->
       <div style="display:flex;gap:4px;align-items:center">
@@ -4144,6 +4144,17 @@ function openMapView(onReady) {
   const mappedCount = fields.filter(f=>f.mapped).length;
   const attentionCount = fields.filter(f=>f.mapped && (f.healthStatus==='attention'||f.healthStatus==='serious')).length;
   document.getElementById('map-field-count').textContent = mappedCount;
+
+  // Scope label -- reflects the logged-in officer's actual factory/division,
+  // same convention used in the Scout/Survey Planner subtitle (was
+  // hardcoded to "Trichy Div" mock text before).
+  const scopeEl = document.getElementById('map-scope-label');
+  if(scopeEl){
+    scopeEl.textContent = currentUser && currentUser.factory_code
+      ? currentUser.factory_code + (currentUser.division_codes && currentUser.division_codes.length === 1
+          ? ' · ' + (currentUser.division_codes[0].split('-').slice(1).join(' ')) : '')
+      : 'All Factories';
+  }
 
   // Show/hide attention badge
   const badge = document.getElementById('map-attention-badge');
