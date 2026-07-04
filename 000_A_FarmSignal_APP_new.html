@@ -4218,7 +4218,9 @@ function openScoutMapView(code) {
   openMapView(() => {
     showScoutBanner(code);
     if(geo && geo.centroid && leafletMap) {
-      zoomToField(geo);
+      zoomToField(geo, false); // false = don't auto-open the generic detail
+                                // panel; keep only the single Scout-mode
+                                // banner + its one geofenced button visible
     } else if(leafletMap && f) {
       leafletMap.setView([10.875, 78.855], 13);
       setTimeout(() => alert(`${f.name}'s field boundary has not been GeoTagged yet.\nYou can proceed directly to Scout.`), 300);
@@ -4234,7 +4236,7 @@ function openSurveyMapView(code, stageKey) {
   openMapView(() => {
     showSurveyBanner(code, stageKey);
     if(geo && geo.centroid && leafletMap) {
-      zoomToField(geo);
+      zoomToField(geo, false); // same as above -- Survey-mode banner only
     } else if(leafletMap && f) {
       leafletMap.setView([10.875, 78.855], 13);
       setTimeout(() => alert(`${f.name}'s field boundary has not been GeoTagged yet.\nYou can proceed directly to Survey.`), 300);
