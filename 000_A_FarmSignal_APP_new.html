@@ -5060,6 +5060,7 @@ async function resolveLatestFileURLs(){
 }
 let fieldDataLoaded=false;
 let divCodeMap = {}; // division_code -> name, built during Supabase load
+let scoutByPlot = {}; // plot_no -> [scout_reports] loaded from Supabase
 
 // Parses a planting date from the GeoJSON's DOP property -- handles a
 // plain ISO/locale date string, or an Excel serial number (in case it
@@ -5350,9 +5351,21 @@ async function loadFieldDataFromSupabase(){
     fieldGeoData  = newGeo;
     fieldDataLoaded = true;
 
+    // Fetch scout reports for factory dashboard scout status
+    scoutByPlot = {};
+    const {data:srData} = await _sb
+      .from('scout_reports')
+      .select('plot_no,visit_date,stress_type,stress_severity,follow_up_date,follow_up_required')
+      .order('visit_date', {ascending:false});
+    if(srData) srData.forEach(r=>{
+      if(!scoutByPlot[r.plot_no]) scoutByPlot[r.plot_no]=[];
+      scoutByPlot[r.plot_no].push(r);
+    });
+    console.log('Scout reports loaded:', (srData||[]).length);
+
     const withNdvi = newGeo.filter(g=>g.ndvi!==null).length;
     const withBnd  = newGeo.filter(g=>g.polygon).length;
-    console.log(`Supabase loaded: ${newFields.length} plots, ${withNdvi} with NDVI, ${withBnd} with boundary`);
+    console.log('Supabase loaded: '+newFields.length+' plots, '+withNdvi+' with NDVI, '+withBnd+' with boundary');
     return true;
 
   }catch(err){
@@ -7281,6 +7294,9 @@ function submitSurvey() {
 // DIVISIONS is now computed dynamically from real fields data in renderFactoryDash()
 
 function renderFactoryDash() {
+  try { _renderFactoryDash(); } catch(e){ console.error('renderFactoryDash error:', e); }
+}
+function _renderFactoryDash() {
   const filterMill = (document.getElementById('fd-filter-mill')||{}).value || '';
   const filterDiv  = (document.getElementById('fd-filter-division')||{}).value || '';
 
@@ -7379,7 +7395,7 @@ function renderFactoryDash() {
   if(hdEl) hdEl.textContent = latestDate;
 
   // Latest scout date
-  const allScouts = Object.values(scoutByPlot).flat();
+  const allScouts = Object.values(scoutByPlot||{}).flat().filter(r=>r&&r.visit_date);
   const latestScout = allScouts.length
     ? allScouts.sort((a,b)=>b.visit_date.localeCompare(a.visit_date))[0].visit_date : null;
   const sdEl = document.getElementById('factory-scout-date');
@@ -7387,7 +7403,8 @@ function renderFactoryDash() {
     ? 'Last: '+new Date(latestScout).toLocaleDateString('en-GB',{day:'2-digit',month:'short'})
     : 'No scouts yet';
 
-  document.getElementById('notif-badge').textContent = totalAlerts;
+  const notifBadge = document.getElementById('notif-badge');
+  if(notifBadge) notifBadge.textContent = totalAlerts;
 
   // KPI cards
   document.getElementById('factory-kpi-row').innerHTML = [
