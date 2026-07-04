@@ -1559,8 +1559,8 @@ body {
     <div class="app-bar" style="background:#8B4500">
       <button class="back-btn" onclick="goBack()"><i class="ti ti-arrow-left"></i></button>
       <div style="flex:1">
-        <h1 style="color:#FFE0B8">Crop Scout Alerts</h1>
-        <div class="sub" style="color:#FFC080">Need Attention fields · Trichy Division</div>
+        <h1 style="color:#FFE0B8">Crop Scout Planner</h1>
+        <div class="sub" style="color:#FFC080" id="scout-alerts-sub">Need Attention &amp; Serious fields</div>
       </div>
       <button onclick="goTo('s-map')" style="background:rgba(255,192,128,0.2);border:1px solid rgba(255,192,128,0.4);border-radius:8px;color:#FFC080;font-size:10px;font-weight:600;padding:5px 8px;cursor:pointer">
         <i class="ti ti-map-2" style="font-size:13px"></i>
@@ -1570,7 +1570,7 @@ body {
       <!-- Calendar strip -->
       <div style="background:#fff;border-radius:12px;border:1px solid #e8e4da;padding:10px 12px;margin-bottom:10px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <span style="font-size:12px;font-weight:600;color:#444441">Scout Calendar · May 2026</span>
+          <span style="font-size:12px;font-weight:600;color:#444441">Scout Calendar · <span id="scout-calendar-hdr">Jul 2026</span></span>
           <span style="font-size:10px;color:#888780">15-day window</span>
         </div>
         <div style="display:flex;gap:4px;overflow-x:auto;padding-bottom:4px" id="scout-calendar-strip"></div>
@@ -1859,7 +1859,7 @@ body {
 
       <div style="background:#FDEBD0;border-radius:10px;padding:10px 12px;margin-bottom:14px;border:1px solid #F5C4A0">
         <div style="font-size:10px;color:#994800;font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.04em">Select Scout Date</div>
-        <input type="date" id="sched-date-input" min="2026-05-10" max="2026-06-30"
+        <input type="date" id="sched-date-input"
           style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid #F5C4A0;
           font-size:14px;font-weight:600;color:#8B4500;background:#fff;outline:none;font-family:inherit"
           oninput="updateSchedulePreview()"/>
@@ -4433,7 +4433,17 @@ function openScheduleModal(code) {
   const f = getFieldByCode(code);
   if(!f) return;
   document.getElementById('sched-field-name').textContent = f.name + ' · ' + f.code + ' · ' + f.village;
-  document.getElementById('sched-date-input').value = '';
+
+  // Set min = today, max = 90 days from now
+  const today = new Date();
+  const maxDate = new Date(today);
+  maxDate.setDate(today.getDate() + 90);
+  const inp = document.getElementById('sched-date-input');
+  inp.min = today.toISOString().slice(0,10);
+  inp.max = maxDate.toISOString().slice(0,10);
+  inp.value = today.toISOString().slice(0,10); // default to today
+  updateSchedulePreview();
+
   document.getElementById('sched-followup-preview').style.display = 'none';
   document.getElementById('schedule-modal').style.display = 'flex';
 }
@@ -4451,12 +4461,17 @@ function updateSchedulePreview() {
 async function confirmSchedule() {
   const val = document.getElementById('sched-date-input').value;
   if(!val){ alert('Please pick a date.'); return; }
+
+  // Handle survey scheduling mode
+  if(handleSurveyScheduleConfirm(val)) return;
+
   const code = scheduleModalIdx;
   if(!code){ alert('No field selected.'); return; }
 
   const btn = document.getElementById('sched-confirm-btn');
-  if(btn){ btn.disabled=true; btn.textContent='Saving...'; }
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="ti ti-loader-2"></i> Saving...'; }
 
+  const today = new Date().toISOString().slice(0,10);
   const fuDate = addDays(val, 15);
   const reportRow = {
     plot_no:            code,
@@ -4472,65 +4487,85 @@ async function confirmSchedule() {
   try {
     const {data, error} = await _sb.from('scout_reports').insert(reportRow).select().single();
     if(error) throw error;
-    // Update local scoutByPlot
     if(!scoutByPlot[code]) scoutByPlot[code] = [];
     scoutByPlot[code].unshift({...reportRow, id: data.id, created_at: new Date().toISOString()});
-    console.log('Schedule saved to Supabase:', code, val);
+    console.log('Schedule saved:', code, val);
+    showSyncToast('Scout scheduled for ' + fmtDate(val));
   } catch(e){
     console.warn('Supabase save failed, saving locally:', e.message);
-    // Fall back to scoutDB
     scoutDB[code] = scoutDB[code] || {};
     scoutDB[code].scheduledDate = val;
-    scoutDB[code].scoutDate = null;
-    scoutDB[code].followupDue = fuDate;
-    scoutDB[code].followupDone = false;
-    scoutDB[code].status = 'scheduled';
+    scoutDB[code].scoutDate     = null;
+    scoutDB[code].followupDue   = fuDate;
+    scoutDB[code].followupDone  = false;
+    scoutDB[code].status        = 'scheduled';
   }
 
-  if(btn){ btn.disabled=false; btn.textContent='Confirm Schedule'; }
+  if(btn){ btn.disabled=false; btn.innerHTML='<i class="ti ti-check"></i> Confirm Schedule'; }
   closeScheduleModal();
   renderScoutAlerts();
 }
 
-// ── Calendar — driven from scoutDB ─────────────────────────────────────────
+// ── Calendar — 15-day window from today ────────────────────────────────────
 function renderCalendar() {
-  const days = [
-    {d:'10',day:'Sat'},{d:'11',day:'Sun'},{d:'12',day:'Mon'},{d:'13',day:'Tue'},
-    {d:'14',day:'Wed'},{d:'15',day:'Thu'},{d:'16',day:'Fri'},{d:'17',day:'Sat'},
-    {d:'18',day:'Sun'},{d:'19',day:'Mon'},{d:'20',day:'Tue'},{d:'21',day:'Wed'},
-    {d:'22',day:'Thu'},{d:'23',day:'Fri'}
-  ];
-  // Build date → dots from scoutDB
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0,10);
+  const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  // Build 15-day array starting today
+  const days = [];
+  for(let i=0; i<15; i++){
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    days.push({
+      dateStr: d.toISOString().slice(0,10),
+      d:       String(d.getDate()).padStart(2,'0'),
+      day:     DAY_NAMES[d.getDay()],
+      isToday: i===0
+    });
+  }
+
+  // Update month/year header
+  const hdr = document.getElementById('scout-calendar-hdr');
+  if(hdr) hdr.textContent = MONTH_NAMES[today.getMonth()] + ' ' + today.getFullYear();
+
+  // Build dotMap from real scoutByPlot data
   const dotMap = {};
-  Object.entries(scoutDB).forEach(([idx, s]) => {
-    if(s.scheduledDate) {
-      const d = s.scheduledDate.split('-')[2]; // day part
-      dotMap[d] = dotMap[d] || [];
-      dotMap[d].push(s.scoutDate ? 'fu' : 'sched');
-    }
-    if(s.followupDue && !s.followupDone) {
-      const d = s.followupDue.split('-')[2];
-      dotMap[d] = dotMap[d] || [];
-      dotMap[d].push('fu');
-    }
+  Object.values(scoutByPlot).forEach(reports => {
+    (reports||[]).forEach(s => {
+      if(s.visit_date){
+        const d = s.visit_date.split('-')[2];
+        dotMap[d] = dotMap[d] || [];
+        dotMap[d].push('sched');
+      }
+      if(s.follow_up_date && s.follow_up_required){
+        const d = s.follow_up_date.split('-')[2];
+        dotMap[d] = dotMap[d] || [];
+        dotMap[d].push('fu');
+      }
+    });
   });
+  // Also include local scoutDB for newly scheduled
+  Object.values(scoutDB).forEach(s => {
+    if(s.scheduledDate){ const d=s.scheduledDate.split('-')[2]; dotMap[d]=dotMap[d]||[]; dotMap[d].push('sched'); }
+    if(s.followupDue && !s.followupDone){ const d=s.followupDue.split('-')[2]; dotMap[d]=dotMap[d]||[]; dotMap[d].push('fu'); }
+  });
+
   const el = document.getElementById('scout-calendar-strip');
   if(!el) return;
   el.innerHTML = days.map(x => {
-    const isToday = x.d === '10';
-    const dots = dotMap[x.d] || [];
-    const hasSched = dots.includes('sched');
-    const hasFu = dots.includes('fu');
-    return `<div style="flex-shrink:0;width:38px;border-radius:8px;padding:5px 2px;text-align:center;cursor:pointer;
-      background:${isToday?'#8B4500':hasFu?'#fde8d0':hasSched?'#EAF3DE':'#F8F7F4'};
-      border:1px solid ${isToday?'#8B4500':hasFu?'#F5C4A0':hasSched?'#C0DD97':'#e8e4da'}">
-      <div style="font-size:9px;color:${isToday?'#FFC080':'#888780'}">${x.day}</div>
-      <div style="font-size:13px;font-weight:700;color:${isToday?'#fff':hasFu?'#994800':hasSched?'#3B6D11':'#444441'}">${x.d}</div>
-      <div style="height:7px;display:flex;align-items:center;justify-content:center;gap:2px">
-        ${hasSched?'<div style="width:5px;height:5px;background:#2ea84a;border-radius:50%"></div>':''}
-        ${hasFu?'<div style="width:5px;height:5px;background:#f07c2a;border-radius:50%"></div>':''}
-      </div>
-    </div>`;
+    const hasSched = (dotMap[x.d]||[]).includes('sched');
+    const hasFu    = (dotMap[x.d]||[]).includes('fu');
+    return '<div style="flex-shrink:0;width:38px;border-radius:8px;padding:5px 2px;text-align:center;cursor:pointer;'
+      +'background:'+(x.isToday?'#8B4500':hasFu?'#fde8d0':hasSched?'#EAF3DE':'#F8F7F4')+';'
+      +'border:1px solid '+(x.isToday?'#8B4500':hasFu?'#F5C4A0':hasSched?'#C0DD97':'#e8e4da')+'">'
+      +'<div style="font-size:9px;color:'+(x.isToday?'#FFC080':'#888780')+'">'+x.day+'</div>'
+      +'<div style="font-size:13px;font-weight:700;color:'+(x.isToday?'#fff':hasFu?'#994800':hasSched?'#3B6D11':'#444441')+'">'+parseInt(x.d)+'</div>'
+      +'<div style="height:7px;display:flex;align-items:center;justify-content:center;gap:2px">'
+      +(hasSched?'<div style="width:5px;height:5px;background:#2ea84a;border-radius:50%"></div>':'')
+      +(hasFu?'<div style="width:5px;height:5px;background:#f07c2a;border-radius:50%"></div>':'')
+      +'</div></div>';
   }).join('');
 }
 
@@ -4550,9 +4585,22 @@ function setScoutFilter(key) {
 
 function renderScoutAlerts() {
   renderCalendar();
-  const attn = fields.filter(f => f.mapped && f.healthStatus === 'attention');
 
-  // Count per status
+  // Only Attention + Serious fields need scouting
+  const attn = fields.filter(f => f.mapped &&
+    (f.healthStatus === 'attention' || f.healthStatus === 'serious'));
+
+  // Update subtitle with scope
+  const sub = document.getElementById('scout-alerts-sub');
+  if(sub){
+    const scope = currentUser && currentUser.factory_code
+      ? currentUser.factory_code + (currentUser.division_codes && currentUser.division_codes.length === 1
+          ? ' · ' + (currentUser.division_codes[0].split('-').slice(1).join(' ')) : '')
+      : 'All Factories';
+    sub.textContent = 'Need Attention & Serious · ' + scope;
+  }
+
+  // Count per status from real data
   const counts = { unattended:0, scheduled:0, scouted:0, overdue:0, closed:0 };
   attn.forEach(f => { const st=getScoutStatus(f.code); counts[st.type]++; });
 
@@ -7121,32 +7169,20 @@ function openSurveyScheduleModal(code, stageKey) {
   window._surveyScheduleMode = true;
 }
 
-function confirmSchedule() {
-  const val = document.getElementById('sched-date-input').value;
-  if(!val) { alert('Please pick a date.'); return; }
-
+// confirmSchedule is defined above as async -- this block handles survey mode only
+function handleSurveyScheduleConfirm(val) {
   if(window._surveyScheduleMode) {
-    // Survey scheduling
     const { code, stageKey } = surveyScheduleModal;
-    const dbKey = `${code}_${stageKey}`;
+    const dbKey = code + '_' + stageKey;
     surveyDB[dbKey] = surveyDB[dbKey] || {};
     surveyDB[dbKey].scheduledDate = val;
     delete surveyDB[dbKey].surveyDate;
     window._surveyScheduleMode = false;
     closeScheduleModal();
     renderSurveyAlerts();
-  } else {
-    // Scout scheduling (existing)
-    const code2 = scheduleModalIdx;
-    scoutDB[code2] = scoutDB[code2] || {};
-    scoutDB[code2].scheduledDate = val;
-    scoutDB[code2].scoutDate = null;
-    scoutDB[code2].followupDue = null;
-    scoutDB[code2].followupDone = false;
-    scoutDB[code2].status = 'scheduled';
-    closeScheduleModal();
-    renderScoutAlerts();
+    return true;
   }
+  return false;
 }
 
 function renderSurveyCalendar() {
