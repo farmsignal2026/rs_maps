@@ -308,84 +308,59 @@ body {
 
   <!-- ========== SCREEN 1: DASHBOARD ========== -->
   <div class="screen" id="s-dashboard">
-    <div class="app-bar" style="padding:10px 12px">
-      <div style="flex:1;min-width:0">
-        <div class="breadcrumb" style="margin-bottom:1px">
-          <span>RSCL</span>
-          <i class="ti ti-chevron-right" style="font-size:8px;opacity:0.6"></i>
-          <span id="dash-scope-label" style="color:#EAF3DE;font-weight:600">Trichy Div</span>
+    <div style="background:#1a3a2a;padding:8px 12px 0">
+      <!-- Title row -->
+      <div style="display:flex;align-items:center;gap:8px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.1)">
+        <button class="back-btn" onclick="goBack()" style="flex-shrink:0"><i class="ti ti-arrow-left"></i></button>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+            FarmSignal &mdash; RSCL Smart Cane Monitoring
+          </div>
+          <div style="font-size:10px;color:#9FE1CB;margin-top:1px" id="dash-scope-label">Fields</div>
         </div>
-        <h1 style="font-size:14px">Division Dashboard</h1>
       </div>
-      <!-- Icon-only buttons — 30×30px each, 5px gap — fits 375px phone comfortably -->
-      <div style="display:flex;align-items:center;gap:5px;flex-shrink:0">
-        <button onclick="showUserMenu()" title="Profile"
-          style="width:30px;height:30px;border-radius:50%;background:rgba(192,221,151,0.2);
-          border:1px solid rgba(192,221,151,0.4);cursor:pointer;color:#C0DD97;font-size:16px;
-          display:flex;align-items:center;justify-content:center">
-          <i class="ti ti-user-circle" id="user-chip"></i>
+      <!-- Nav row with labels -->
+      <div style="display:flex;align-items:center;justify-content:space-around;padding:6px 0">
+        <button data-role="home" onclick="goTo('s-factory-dash');renderFactoryDash()"
+          style="display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;cursor:pointer;color:#85B7EB;padding:2px 4px;min-width:40px">
+          <i class="ti ti-home" style="font-size:16px"></i>
+          <span style="font-size:8px;font-weight:600;letter-spacing:0.02em">Home</span>
         </button>
-        <button onclick="goTo('s-gallery');renderGallery()" title="Gallery"
-          style="width:30px;height:30px;border-radius:8px;background:rgba(192,221,151,0.15);
-          border:1px solid rgba(192,221,151,0.3);cursor:pointer;color:#C0DD97;font-size:15px;
-          display:flex;align-items:center;justify-content:center">
-          <i class="ti ti-photo"></i>
+        <button data-role="map" onclick="pendingScoutIdx=null;openMapView()"
+          style="display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;cursor:pointer;color:#C0DD97;padding:2px 4px;min-width:40px">
+          <i class="ti ti-map-2" style="font-size:16px"></i>
+          <span style="font-size:8px;font-weight:600;letter-spacing:0.02em">Map</span>
         </button>
-        <button onclick="pendingScoutIdx=null;openMapView()" title="Map"
-          style="width:30px;height:30px;border-radius:8px;background:rgba(192,221,151,0.15);
-          border:1px solid rgba(192,221,151,0.3);cursor:pointer;color:#C0DD97;font-size:15px;
-          display:flex;align-items:center;justify-content:center">
-          <i class="ti ti-map-2"></i>
+        <button data-role="planner" onclick="goTo('s-scout-alerts');renderScoutAlerts()"
+          style="position:relative;display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;cursor:pointer;color:#f07c2a;padding:2px 4px;min-width:40px">
+          <i class="ti ti-calendar-check" style="font-size:16px"></i>
+          <span id="scout-alert-dot" style="position:absolute;top:-2px;right:4px;background:#f07c2a;color:#fff;font-size:7px;font-weight:700;min-width:13px;height:13px;border-radius:7px;display:flex;align-items:center;justify-content:center;border:1.5px solid #1a3a2a;padding:0 2px">0</span>
+          <span style="font-size:8px;font-weight:600;letter-spacing:0.02em">Planner</span>
         </button>
-        <button data-role="factory" onclick="goTo('s-factory-dash');renderFactoryDash()" title="Factory"
-          style="width:30px;height:30px;border-radius:8px;background:rgba(133,183,235,0.15);
-          border:1px solid rgba(133,183,235,0.3);cursor:pointer;color:#85B7EB;font-size:15px;
-          display:flex;align-items:center;justify-content:center">
-          <i class="ti ti-building-factory"></i>
+        <button data-role="export" onclick="generateReport();goTo('s-report')"
+          style="display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;cursor:pointer;color:#C0DD97;padding:2px 4px;min-width:40px">
+          <i class="ti ti-file-export" style="font-size:16px"></i>
+          <span style="font-size:8px;font-weight:600;letter-spacing:0.02em">Export</span>
         </button>
-        <button data-role="reports" onclick="generateReport();goTo('s-report')" title="Export PDF"
-          style="width:30px;height:30px;border-radius:8px;background:rgba(192,221,151,0.15);
-          border:1px solid rgba(192,221,151,0.3);cursor:pointer;color:#C0DD97;font-size:15px;
-          display:flex;align-items:center;justify-content:center">
-          <i class="ti ti-file-export"></i>
+        <button data-role="bell" onclick="goTo('s-notifications')"
+          style="position:relative;display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;cursor:pointer;color:#85B7EB;padding:2px 4px;min-width:40px">
+          <i class="ti ti-bell" style="font-size:16px"></i>
+          <span style="font-size:8px;font-weight:600;letter-spacing:0.02em">Alerts</span>
         </button>
-        <!-- Damage -->
-        <button onclick="goTo('s-damage-list');renderDamageList()" title="Damage Assessment"
-          style="position:relative;width:30px;height:30px;border-radius:8px;
-          background:rgba(192,57,43,0.15);border:1px solid rgba(192,57,43,0.35);
-          cursor:pointer;color:#e74c3c;font-size:15px;display:flex;align-items:center;justify-content:center">
-          <i class="ti ti-alert-octagon"></i>
-          <span id="damage-alert-dot" style="position:absolute;top:-4px;right:-4px;background:#c0392b;
-            color:#fff;font-size:7px;font-weight:700;min-width:14px;height:14px;border-radius:7px;
-            display:flex;align-items:center;justify-content:center;border:1.5px solid #3B6D11;padding:0 2px">0</span>
-        </button>
-        <button data-role="scout" onclick="goTo('s-survey-alerts');renderSurveyAlerts()" title="Crop Survey"
-          style="position:relative;width:30px;height:30px;border-radius:8px;
-          background:rgba(133,183,235,0.15);border:1px solid rgba(133,183,235,0.3);
-          cursor:pointer;color:#85B7EB;font-size:15px;display:flex;align-items:center;justify-content:center">
-          <i class="ti ti-clipboard-check"></i>
-          <span id="survey-alert-dot" style="position:absolute;top:-4px;right:-4px;background:#185FA5;
-            color:#fff;font-size:7px;font-weight:700;min-width:14px;height:14px;border-radius:7px;
-            display:flex;align-items:center;justify-content:center;border:1.5px solid #3B6D11;padding:0 2px">0</span>
-        </button>
-        <button data-role="scout" onclick="goTo('s-scout-alerts');renderScoutAlerts()" title="Crop Scout"
-          style="position:relative;width:30px;height:30px;border-radius:8px;
-          background:rgba(240,124,42,0.15);border:1px solid rgba(240,124,42,0.4);
-          cursor:pointer;color:#f07c2a;font-size:15px;display:flex;align-items:center;justify-content:center">
-          <i class="ti ti-binoculars"></i>
-          <span id="scout-alert-dot" style="position:absolute;top:-4px;right:-4px;background:#f07c2a;
-            color:#fff;font-size:7px;font-weight:700;min-width:14px;height:14px;border-radius:7px;
-            display:flex;align-items:center;justify-content:center;border:1.5px solid #3B6D11;padding:0 2px">3</span>
-        </button>
-        <!-- Network status + sync queue badge -->
-        <div style="position:relative;display:flex;align-items:center;justify-content:center;width:30px;height:30px"
-          title="Network status" onclick="syncOfflineQueue()">
+        <div data-role="sync" style="position:relative;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;padding:2px 4px;min-width:40px"
+          onclick="syncOfflineQueue()">
           <span id="network-indicator" style="width:10px;height:10px;border-radius:50%;
-            background:#4ade80;display:block;box-shadow:0 0 0 3px rgba(74,222,128,0.25)"></span>
-          <span id="sync-badge" style="display:none;position:absolute;top:-4px;right:-4px;
-            background:#f59e0b;color:#fff;font-size:7px;font-weight:700;min-width:14px;height:14px;
-            border-radius:7px;align-items:center;justify-content:center;border:1.5px solid #1a3a6b;padding:0 2px">0</span>
+            background:#4ade80;display:block;box-shadow:0 0 0 3px rgba(74,222,128,0.25);margin-top:3px"></span>
+          <span id="sync-badge" style="display:none;position:absolute;top:-2px;right:4px;
+            background:#f59e0b;color:#fff;font-size:7px;font-weight:700;min-width:13px;height:13px;
+            border-radius:7px;align-items:center;justify-content:center;border:1.5px solid #1a3a2a;padding:0 2px">0</span>
+          <span style="font-size:8px;font-weight:600;letter-spacing:0.02em;color:#4ade80">Sync</span>
         </div>
+        <button data-role="profile" onclick="showUserMenu()"
+          style="display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;cursor:pointer;color:#C0DD97;padding:2px 4px;min-width:40px">
+          <i class="ti ti-user-circle" id="user-chip" style="font-size:16px"></i>
+          <span style="font-size:8px;font-weight:600;letter-spacing:0.02em">Profile</span>
+        </button>
       </div>
     </div>
     <div class="body">
@@ -527,11 +502,6 @@ body {
         </div>
       </div>
 
-      <div style="background:#E6F1FB;border-radius:12px;padding:11px 14px;border:1px solid #B5D4F4;font-size:12px;color:#0C447C;margin-bottom:12px;display:flex;gap:8px;align-items:center">
-        <i class="ti ti-info-circle" style="font-size:16px;flex-shrink:0"></i>
-        Walk to the field boundary before starting. Ensure GPS accuracy is below 10 m.
-      </div>
-
       <!-- Field Photo Buttons -->
       <div id="pv-photos-section" style="display:none;margin-bottom:12px">
         <div style="font-size:11px;font-weight:700;color:#5F5E5A;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">📷 Field Photos</div>
@@ -570,38 +540,26 @@ body {
     </div>
 
     <div class="bottom-actions">
-      <!-- GeoTag button -->
       <button class="action-btn primary" id="pv-geotag-btn" data-role="geotag" onclick="goTo('s-gps')"
         style="background:#27500A">
         <i class="ti ti-map-pin-plus" style="font-size:20px"></i>
         Start GeoTagging This Plot
       </button>
-
-      <!-- Scout / Survey / Back / Map row -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:0">
-        <button class="action-btn secondary" data-role="scout"
-          onclick="openScoutFormForCurrentField()"
-          style="margin:0;border-color:#8B4500;color:#8B4500;background:#fff8f0">
-          <i class="ti ti-binoculars" style="font-size:16px"></i>
-          Scout
-        </button>
-        <button class="action-btn secondary" data-role="scout"
-          onclick="openSurveyFormForCurrentField()"
-          style="margin:0;border-color:#185FA5;color:#185FA5;background:#f0f6ff">
-          <i class="ti ti-clipboard-check" style="font-size:16px"></i>
-          Survey
-        </button>
-      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
         <button class="action-btn secondary" onclick="screenHistory=[]; goTo('s-dashboard')" style="margin:0">
           <i class="ti ti-list" style="font-size:16px"></i>
-          Back to List
+          Back to Fields
         </button>
         <button class="action-btn secondary" id="pv-viewmap-btn" onclick="openMapFromPreview()"
-          style="margin:0;display:none;border-color:#0F6E56;color:#0F6E56">
+          style="margin:0;display:flex;border-color:#0F6E56;color:#0F6E56">
           <i class="ti ti-map-2" style="font-size:16px"></i>
-          View Map
+          Scout on Map
         </button>
+      </div>
+      <div style="background:#fef9c3;border-radius:8px;padding:8px 10px;border:1px solid #fde047;
+        font-size:10px;color:#854d0e;display:flex;gap:6px;align-items:center">
+        <i class="ti ti-map-pin" style="font-size:13px;flex-shrink:0"></i>
+        Scout &amp; Survey only from Map — must be within 25m of field
       </div>
     </div>
   </div>
@@ -1360,41 +1318,51 @@ body {
 
   <!-- ========== SCREEN 10: FACTORY SUPERVISOR DASHBOARD ========== -->
   <div class="screen" id="s-factory-dash">
-    <div class="app-bar" style="background:#1a3a6b;padding:10px 12px">
-      <button class="back-btn" onclick="goBack()"><i class="ti ti-arrow-left"></i></button>
-      <div style="flex:1">
-        <div class="breadcrumb" style="margin-bottom:2px">
-          <span>RSCL Group</span>
-          <i class="ti ti-chevron-right" style="font-size:9px;opacity:0.6"></i>
-          <span style="color:#E6F1FB;font-weight:600">RSCL Factory</span>
+    <div style="background:#1a3a6b;padding:8px 12px 0">
+      <!-- Title row -->
+      <div style="display:flex;align-items:center;gap:8px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.1)">
+        <button class="back-btn" onclick="goBack()" style="flex-shrink:0"><i class="ti ti-arrow-left"></i></button>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+            FarmSignal &mdash; RSCL Smart Cane Monitoring
+          </div>
+          <div style="font-size:10px;color:#9FE1CB;margin-top:1px">Overview</div>
         </div>
-        <h1 style="font-size:14px">Factory Dashboard</h1>
+        <span id="fd-role-chip" style="background:rgba(133,183,235,0.2);border:1px solid rgba(133,183,235,0.4);
+          border-radius:5px;color:#85B7EB;font-size:9px;font-weight:700;padding:3px 6px;white-space:nowrap;flex-shrink:0">Admin</span>
       </div>
-      <div style="display:flex;align-items:center;gap:5px;flex-shrink:0">
-        <span class="chip-info" style="background:rgba(133,183,235,0.2);border:1px solid rgba(133,183,235,0.4);border-radius:6px;color:#85B7EB;font-size:10px;font-weight:600;padding:4px 8px">Factory Head</span>
-        <button onclick="goTo('s-dashboard')" title="Division Dashboard"
-          style="width:30px;height:30px;border-radius:8px;background:rgba(192,221,151,0.15);border:1px solid rgba(192,221,151,0.3);cursor:pointer;color:#C0DD97;font-size:15px;display:flex;align-items:center;justify-content:center">
-          <i class="ti ti-layout-dashboard"></i>
+      <!-- Nav row with labels -->
+      <div style="display:flex;align-items:center;justify-content:space-around;padding:6px 0">
+        <button data-role="fields" onclick="goTo('s-dashboard')"
+          style="display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;cursor:pointer;color:#C0DD97;padding:2px 4px;min-width:40px">
+          <i class="ti ti-layout-list" style="font-size:16px"></i>
+          <span style="font-size:8px;font-weight:600;letter-spacing:0.02em">Fields</span>
         </button>
-        <button onclick="pendingScoutIdx=null;openMapView()" title="Map"
-          style="width:30px;height:30px;border-radius:8px;background:rgba(192,221,151,0.15);border:1px solid rgba(192,221,151,0.3);cursor:pointer;color:#C0DD97;font-size:15px;display:flex;align-items:center;justify-content:center">
-          <i class="ti ti-map-2"></i>
+        <button data-role="map" onclick="pendingScoutIdx=null;openMapView()"
+          style="display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;cursor:pointer;color:#C0DD97;padding:2px 4px;min-width:40px">
+          <i class="ti ti-map-2" style="font-size:16px"></i>
+          <span style="font-size:8px;font-weight:600;letter-spacing:0.02em">Map</span>
         </button>
-        <button data-role="scout" onclick="goTo('s-scout-alerts');renderScoutAlerts()" title="Scout"
-          style="position:relative;width:30px;height:30px;border-radius:8px;background:rgba(240,124,42,0.15);border:1px solid rgba(240,124,42,0.4);cursor:pointer;color:#f07c2a;font-size:15px;display:flex;align-items:center;justify-content:center">
-          <i class="ti ti-binoculars"></i>
+        <button data-role="planner" onclick="goTo('s-scout-alerts');renderScoutAlerts()"
+          style="position:relative;display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;cursor:pointer;color:#f07c2a;padding:2px 4px;min-width:40px">
+          <i class="ti ti-calendar-check" style="font-size:16px"></i>
+          <span style="font-size:8px;font-weight:600;letter-spacing:0.02em">Planner</span>
         </button>
-        <button data-role="scout" onclick="goTo('s-survey-alerts');renderSurveyAlerts()" title="Survey"
-          style="position:relative;width:30px;height:30px;border-radius:8px;background:rgba(133,183,235,0.15);border:1px solid rgba(133,183,235,0.3);cursor:pointer;color:#85B7EB;font-size:15px;display:flex;align-items:center;justify-content:center">
-          <i class="ti ti-clipboard-check"></i>
+        <button data-role="export" onclick="generateReport();goTo('s-report')"
+          style="display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;cursor:pointer;color:#C0DD97;padding:2px 4px;min-width:40px">
+          <i class="ti ti-file-export" style="font-size:16px"></i>
+          <span style="font-size:8px;font-weight:600;letter-spacing:0.02em">Export</span>
         </button>
-        <button data-role="reports" onclick="generateReport();goTo('s-report')" title="Export"
-          style="width:30px;height:30px;border-radius:8px;background:rgba(192,221,151,0.15);border:1px solid rgba(192,221,151,0.3);cursor:pointer;color:#C0DD97;font-size:15px;display:flex;align-items:center;justify-content:center">
-          <i class="ti ti-file-export"></i>
+        <button data-role="bell" onclick="goTo('s-notifications')"
+          style="position:relative;display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;cursor:pointer;color:#85B7EB;padding:2px 4px;min-width:40px">
+          <i class="ti ti-bell" style="font-size:16px"></i>
+          <span id="notif-badge" style="position:absolute;top:-2px;right:4px;background:#ef4444;color:#fff;font-size:7px;font-weight:700;min-width:13px;height:13px;border-radius:7px;display:flex;align-items:center;justify-content:center;border:1.5px solid #1a3a6b;padding:0 2px">0</span>
+          <span style="font-size:8px;font-weight:600;letter-spacing:0.02em">Alerts</span>
         </button>
-        <button onclick="goTo('s-notifications')" title="Notifications" style="position:relative;width:30px;height:30px;border-radius:8px;background:none;border:none;cursor:pointer;color:#85B7EB;font-size:20px;display:flex;align-items:center;justify-content:center">
-          <i class="ti ti-bell"></i>
-          <span id="notif-badge" style="position:absolute;top:-3px;right:-3px;background:#ef4444;color:#fff;font-size:8px;font-weight:700;width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:1.5px solid #1a3a6b">0</span>
+        <button data-role="profile" onclick="showUserMenu()"
+          style="display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;cursor:pointer;color:#C0DD97;padding:2px 4px;min-width:40px">
+          <i class="ti ti-user-circle" style="font-size:16px"></i>
+          <span style="font-size:8px;font-weight:600;letter-spacing:0.02em">Profile</span>
         </button>
       </div>
     </div>
@@ -1905,7 +1873,7 @@ body {
         <button onclick="closeScheduleModal()"
           style="padding:12px;border-radius:10px;border:1px solid #D3D1C7;background:#F1EFE8;
           font-size:13px;font-weight:600;color:#5F5E5A;cursor:pointer">Cancel</button>
-        <button onclick="confirmSchedule()"
+        <button id="sched-confirm-btn" onclick="confirmSchedule()"
           style="padding:12px;border-radius:10px;border:none;background:#8B4500;
           color:#FFE0B8;font-size:13px;font-weight:600;cursor:pointer">
           <i class="ti ti-check" style="font-size:14px"></i> Confirm
@@ -2012,14 +1980,20 @@ Object.defineProperty(window,'_sb',{get:()=>getSB()});
 
 // ── ROLE SYSTEM (3-tier) ─────────────────────────────────────────────────────
 function roleToAccess(role){
+  // Role-based nav matrix:
+  // home=Overview, fields, map, planner, export, bell, sync, profile
   if(role==='admin')
-    return ['factory_dash','division_dash','map','reports','notifications','scout_view','scout','geotag','user_mgmt'];
+    return ['home','fields','map','planner','export','bell','sync','profile',
+            'factory_dash','division_dash','reports','notifications','scout_view','scout','geotag','user_mgmt'];
   if(role==='manager')
-    return ['factory_dash','division_dash','map','reports','notifications','scout_view','scout'];
+    return ['home','fields','map','planner','export','bell','profile',
+            'factory_dash','division_dash','reports','notifications','scout_view','scout'];
   if(role==='officer')
-    return ['division_dash','map','scout_view','scout','geotag','notifications'];
+    return ['home','fields','map','planner','bell','sync','profile',
+            'division_dash','scout_view','scout','geotag','notifications'];
   if(role==='viewer')
-    return ['division_dash','map','scout_view','notifications'];
+    return ['home','fields','map','profile',
+            'division_dash','scout_view'];
   return ['map'];
 }
 function roleToLandingScreen(role){
@@ -3803,23 +3777,97 @@ function showFieldDetailPanel(geoItem){
     }
   }
 
-  // Show scout button for ANY Need Attention field — not just when in scout mode
+  // Geofenced Scout + Survey buttons
   const dpScout = document.getElementById('dp-scout-btn');
   if(dpScout) {
-    const isAttention = geoItem.healthStatus === 'attention' || geoItem.healthStatus === 'serious';
-    const targetCode  = pendingScoutIdx || geoItem.code; // use pending or this field's code
-    if(isAttention) {
-      dpScout.style.display = 'flex';
-      dpScout.onclick = () => openScoutForm(targetCode);
-      // Update label to reflect which plot
-      const f = getFieldByCode(geoItem.code);
-      dpScout.innerHTML = `<i class="ti ti-binoculars" style="font-size:18px"></i> Scout ${f?.name || 'this Plot'} →`;
-    } else {
-      dpScout.style.display = 'none';
-    }
+    dpScout.style.display = 'flex';
+    dpScout.innerHTML = '<i class="ti ti-binoculars" style="font-size:16px"></i> Scout';
+    dpScout.style.cssText += ';background:#fff8f0;border-color:#8B4500;color:#8B4500;font-size:12px';
+    dpScout.onclick = () => geoFencedScout(geoItem, 'scout');
   }
+  // Add survey button dynamically next to scout
+  let dpSurvey = document.getElementById('dp-survey-btn');
+  if(!dpSurvey){
+    dpSurvey = document.createElement('button');
+    dpSurvey.id = 'dp-survey-btn';
+    dpSurvey.className = 'action-btn secondary';
+    dpSurvey.style.cssText = 'margin:0;background:#f0f6ff;border-color:#185FA5;color:#185FA5;font-size:12px;flex:1';
+    dpScout.parentElement.appendChild(dpSurvey);
+  }
+  dpSurvey.innerHTML = '<i class="ti ti-clipboard-check" style="font-size:16px"></i> Survey';
+  dpSurvey.onclick = () => geoFencedScout(geoItem, 'survey');
 
   document.getElementById('field-detail-panel').style.transform='translateY(0)';
+}
+
+function geoFencedScout(geoItem, type){
+  const f = getFieldByCode(geoItem.code);
+  if(!f){ alert('Field not found.'); return; }
+
+  // Geofence check -- must be within 25m of field centroid
+  const FENCE_M = 25;
+
+  if(!navigator.geolocation){
+    alert('GPS not available. Cannot verify you are at the field.');
+    return;
+  }
+
+  // Show loading state
+  const btn = document.getElementById(type==='scout' ? 'dp-scout-btn' : 'dp-survey-btn');
+  const origHTML = btn ? btn.innerHTML : '';
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="ti ti-loader-2" style="font-size:14px"></i> Checking GPS...'; }
+
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      if(btn){ btn.disabled=false; btn.innerHTML=origHTML; }
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      const acc = pos.coords.accuracy;
+
+      // Check field has centroid
+      if(!geoItem.centroid || !geoItem.centroid[0]){
+        // No centroid -- allow if mapped (boundary available)
+        if(!f.mapped){
+          alert('This field has no GPS boundary yet.\nPlease GeoTag the field first before scouting.');
+          return;
+        }
+        // Proceed without geo check for now
+        launchScoutOrSurvey(f, type);
+        return;
+      }
+
+      const dist = haversineM(lat, lng, geoItem.centroid[0], geoItem.centroid[1]);
+      console.log('GPS dist to field:', dist.toFixed(1)+'m, accuracy:', acc.toFixed(1)+'m');
+
+      if(dist > FENCE_M + acc){ // account for GPS accuracy
+        alert('You are ' + Math.round(dist) + 'm from this field.\n\nPlease move within 25m of the field to submit a scout report.\n\nThis ensures data is collected from the actual field.');
+        return;
+      }
+
+      launchScoutOrSurvey(f, type);
+    },
+    err => {
+      if(btn){ btn.disabled=false; btn.innerHTML=origHTML; }
+      // GPS unavailable -- ask officer to confirm they are at the field
+      if(confirm('Could not get GPS location.\n\nAre you physically at the field "'+f.name+'" ('+f.code+')?\n\nTap OK only if you are at the field.')){
+        launchScoutOrSurvey(f, type);
+      }
+    },
+    {timeout:10000, enableHighAccuracy:true, maximumAge:15000}
+  );
+}
+
+function launchScoutOrSurvey(f, type){
+  const idx = fields.indexOf(f);
+  if(idx < 0){ alert('Field not in current list.'); return; }
+  selectedIdx = idx;
+  closeDetailPanel();
+  if(type === 'scout'){
+    openScoutForm(f.code);
+  } else {
+    goTo('s-survey-form');
+    if(typeof startSurveyForField === 'function') startSurveyForField(idx);
+  }
 }
 
 function closeDetailPanel() {
@@ -4196,19 +4244,31 @@ let scoutDB = {
 };
 
 function getScoutStatus(code) {
+  // Read from real Supabase scout_reports first
+  const sr = scoutByPlot[code];
+  const today = new Date().toISOString().slice(0,10);
+
+  if(sr && sr.length){
+    const last = sr[0]; // sorted desc by visit_date
+    if(last.follow_up_required && last.follow_up_date){
+      if(last.follow_up_date < today)
+        return { type:'overdue', s:last, daysOver: daysBetween(last.follow_up_date, today) };
+      else
+        return { type:'scouted', s:last, daysLeft: daysBetween(today, last.follow_up_date) };
+    }
+    return { type:'closed', s:last };
+  }
+
+  // Fall back to local scoutDB (for newly scheduled plots not yet in Supabase)
   const s = scoutDB[code];
   if(!s) return { type:'unattended' };
-  const todayStr = '2026-05-10';
   if(s.followupDone && s.closeStatus !== 'Still-Worst') return { type:'closed', s };
-  if(s.scoutDate && !s.followupDone && s.followupDue && s.followupDue <= todayStr) {
-    return { type:'overdue', s, daysOver: daysBetween(s.followupDue, todayStr) };
-  }
-  if(s.scoutDate && !s.followupDone && s.followupDue && s.followupDue > todayStr) {
-    return { type:'scouted', s, daysLeft: daysBetween(todayStr, s.followupDue) };
-  }
-  if(s.scheduledDate && !s.scoutDate) {
-    return { type:'scheduled', s, daysTo: daysBetween(todayStr, s.scheduledDate) };
-  }
+  if(s.scoutDate && !s.followupDone && s.followupDue && s.followupDue <= today)
+    return { type:'overdue', s, daysOver: daysBetween(s.followupDue, today) };
+  if(s.scoutDate && !s.followupDone && s.followupDue && s.followupDue > today)
+    return { type:'scouted', s, daysLeft: daysBetween(today, s.followupDue) };
+  if(s.scheduledDate && !s.scoutDate)
+    return { type:'scheduled', s, daysTo: daysBetween(today, s.scheduledDate) };
   return { type:'unattended' };
 }
 
@@ -4388,15 +4448,46 @@ function updateSchedulePreview() {
   document.getElementById('sched-followup-date').textContent = fmtDate(fuDate) + ' (auto)';
   document.getElementById('sched-followup-preview').style.display = 'block';
 }
-function confirmSchedule() {
+async function confirmSchedule() {
   const val = document.getElementById('sched-date-input').value;
-  if(!val) { alert('Please pick a date.'); return; }
-  scoutDB[scheduleModalIdx] = scoutDB[scheduleModalIdx] || {};
-  scoutDB[scheduleModalIdx].scheduledDate = val;
-  scoutDB[scheduleModalIdx].scoutDate = null;
-  scoutDB[scheduleModalIdx].followupDue = null;
-  scoutDB[scheduleModalIdx].followupDone = false;
-  scoutDB[scheduleModalIdx].status = 'scheduled';
+  if(!val){ alert('Please pick a date.'); return; }
+  const code = scheduleModalIdx;
+  if(!code){ alert('No field selected.'); return; }
+
+  const btn = document.getElementById('sched-confirm-btn');
+  if(btn){ btn.disabled=true; btn.textContent='Saving...'; }
+
+  const fuDate = addDays(val, 15);
+  const reportRow = {
+    plot_no:            code,
+    visit_date:         val,
+    stress_type:        ['Scheduled'],
+    stress_severity:    'Low',
+    notes:              'Scout scheduled by ' + (currentUser ? currentUser.name : 'manager'),
+    follow_up_required: true,
+    follow_up_date:     fuDate,
+    photo_urls:         [],
+  };
+
+  try {
+    const {data, error} = await _sb.from('scout_reports').insert(reportRow).select().single();
+    if(error) throw error;
+    // Update local scoutByPlot
+    if(!scoutByPlot[code]) scoutByPlot[code] = [];
+    scoutByPlot[code].unshift({...reportRow, id: data.id, created_at: new Date().toISOString()});
+    console.log('Schedule saved to Supabase:', code, val);
+  } catch(e){
+    console.warn('Supabase save failed, saving locally:', e.message);
+    // Fall back to scoutDB
+    scoutDB[code] = scoutDB[code] || {};
+    scoutDB[code].scheduledDate = val;
+    scoutDB[code].scoutDate = null;
+    scoutDB[code].followupDue = fuDate;
+    scoutDB[code].followupDone = false;
+    scoutDB[code].status = 'scheduled';
+  }
+
+  if(btn){ btn.disabled=false; btn.textContent='Confirm Schedule'; }
   closeScheduleModal();
   renderScoutAlerts();
 }
@@ -5872,13 +5963,20 @@ function applyRoleUI() {
 
   // Gate buttons by data-role attribute
   const ACCESS_BTN_MAP = {
-    'geotag':        u.access ? u.access.includes('geotag')       : false,
+    'home':          u.access ? u.access.includes('home')          : false,
+    'fields':        u.access ? u.access.includes('fields')        : false,
+    'map':           true,   // always visible
+    'planner':       u.access ? u.access.includes('planner')       : false,
+    'export':        u.access ? u.access.includes('export')        : false,
+    'bell':          u.access ? u.access.includes('bell')          : false,
+    'sync':          u.access ? u.access.includes('sync')          : false,
+    'profile':       true,   // always visible
+    'geotag':        u.access ? u.access.includes('geotag')        : false,
     'scout':         u.access ? (u.access.includes('scout') || u.access.includes('scout_view')) : false,
-    'factory':       u.access ? u.access.includes('factory_dash') : false,
-    'reports':       u.access ? u.access.includes('reports')      : false,
-    'notifications': u.access ? u.access.includes('notifications'): false,
-    'divonly':       u.access ? u.access.includes('division_dash'): false,
-    'user_mgmt':     u.access ? u.access.includes('user_mgmt')    : false,
+    'factory':       u.access ? u.access.includes('factory_dash')  : false,
+    'reports':       u.access ? u.access.includes('reports')       : false,
+    'notifications': u.access ? u.access.includes('notifications') : false,
+    'user_mgmt':     u.access ? u.access.includes('user_mgmt')     : false,
   };
   document.querySelectorAll('[data-role]').forEach(el => {
     const roleKey = el.getAttribute('data-role');
@@ -5897,9 +5995,12 @@ function applyRoleUI() {
   // Viewer: hide watch banner
   if(isViewer){ const wb=document.getElementById('watch-banner'); if(wb) wb.style.display='none'; }
 
-  // Update factory dashboard role label
-  const fdRole = document.querySelector('#s-factory-dash .chip-info, #s-factory-dash span.chip-info');
-  if(fdRole) fdRole.textContent = u.roleLabel;
+  // Update factory dashboard role chip
+  const fdRole = document.getElementById('fd-role-chip');
+  if(fdRole){
+    const shortRole = {admin:'Admin', manager:'Manager', officer:'Officer', viewer:'Viewer'};
+    fdRole.textContent = shortRole[u.role] || u.roleLabel;
+  }
 }
 
 function refreshDashboardStats() {
@@ -7477,10 +7578,21 @@ function _renderFactoryDash() {
         <div style="width:${hi?(d.health.optimal/hi*100).toFixed(1):0}%;background:#7dcf3a"></div>
         <div style="width:${hi?(d.health.attention/hi*100).toFixed(1):0}%;background:#f07c2a"></div>
       </div>
-      <div style="display:flex;gap:5px;flex-wrap:wrap">
+      <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px">
         <span style="font-size:9px;font-weight:600;padding:2px 7px;border-radius:4px;background:#e8f8d0;color:#3B6D11;border:1px solid #b8e07a">${d.health.good} Good</span>
         <span style="font-size:9px;font-weight:600;padding:2px 7px;border-radius:4px;background:#f5f5dc;color:#5B5B00;border:1px solid #d4d444">${d.health.optimal} Moderate</span>
         <span style="font-size:9px;font-weight:600;padding:2px 7px;border-radius:4px;background:#fde8e8;color:#a00000;border:1px solid #f5a0a0">${d.health.attention} Attention</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:#888780;margin-bottom:4px">
+        <span><i class="ti ti-binoculars" style="font-size:11px;color:#8B4500"></i> Scout Status</span>
+      </div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap">
+        ${d.scout.unattended>0?`<span style="font-size:9px;font-weight:600;padding:2px 7px;border-radius:4px;background:#fde8d0;color:#994800;border:1px solid #f5c4a0">${d.scout.unattended} Unattended</span>`:''}
+        ${d.scout.scheduled>0?`<span style="font-size:9px;font-weight:600;padding:2px 7px;border-radius:4px;background:#E6F1FB;color:#185FA5;border:1px solid #B5D4F4">${d.scout.scheduled} Scheduled</span>`:''}
+        ${d.scout.scouted>0?`<span style="font-size:9px;font-weight:600;padding:2px 7px;border-radius:4px;background:#FFF8DC;color:#a07800;border:1px solid #f0c030">${d.scout.scouted} Scouted</span>`:''}
+        ${d.scout.overdue>0?`<span style="font-size:9px;font-weight:600;padding:2px 7px;border-radius:4px;background:#fde8e8;color:#a00000;border:1px solid #f5a0a0">${d.scout.overdue} Overdue</span>`:''}
+        ${d.scout.closed>0?`<span style="font-size:9px;font-weight:600;padding:2px 7px;border-radius:4px;background:#e8f8d0;color:#3B6D11;border:1px solid #b8e07a">${d.scout.closed} Closed</span>`:''}
+        ${(d.scout.unattended+d.scout.scheduled+d.scout.scouted+d.scout.overdue+d.scout.closed)===0?`<span style="font-size:9px;color:#888780">No scouts yet</span>`:''}
       </div>
     </div>`;
   }).join('');
