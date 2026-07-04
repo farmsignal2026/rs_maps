@@ -7675,13 +7675,10 @@ function submitSurvey() {
 
 // DIVISIONS is now computed dynamically from real fields data in renderFactoryDash()
 
-function renderFactoryDash() {
-  try { _renderFactoryDash(); } catch(e){ console.error('renderFactoryDash error:', e); }
-}
-function _renderFactoryDash() {
-  const filterMill = (document.getElementById('fd-filter-mill')||{}).value || '';
-  const filterDiv  = (document.getElementById('fd-filter-division')||{}).value || '';
-
+// Builds the same real-data division summary used by the Factory Dashboard.
+// Shared by _renderFactoryDash() (with dropdown filters) and generateReport()
+// (unfiltered -- report covers the officer's full scoped field list).
+function computeDivisionSummary(filterMill, filterDiv){
   const allFields = fields.length ? fields : ALL_FIELDS;
   const divMap = {};
 
@@ -7728,6 +7725,28 @@ function _renderFactoryDash() {
     }
   });
 
+  const divisions = Object.values(divMap).sort((a,b)=>a.name.localeCompare(b.name));
+  divisions.forEach(d=>{
+    d.sections = d.sections.size;
+    d.villages = d.villages.size;
+    const avgNdvi  = d.ndviCount    ? d.ndviSum/d.ndviCount       : null;
+    const prevNdvi = d.prevNdviCount? d.prevNdviSum/d.prevNdviCount: null;
+    const diff = (avgNdvi!=null && prevNdvi!=null) ? avgNdvi - prevNdvi : 0;
+    d.ndviTrend    = (diff>=0?'+':'')+diff.toFixed(2);
+    d.ndviTrendDir = diff>=0 ? 'up' : 'down';
+  });
+  return divisions;
+}
+
+function renderFactoryDash() {
+  try { _renderFactoryDash(); } catch(e){ console.error('renderFactoryDash error:', e); }
+}
+function _renderFactoryDash() {
+  const filterMill = (document.getElementById('fd-filter-mill')||{}).value || '';
+  const filterDiv  = (document.getElementById('fd-filter-division')||{}).value || '';
+
+  const allFields = fields.length ? fields : ALL_FIELDS;
+
   // Populate mill dropdown
   const millSel = document.getElementById('fd-filter-mill');
   if(millSel){
@@ -7747,16 +7766,7 @@ function _renderFactoryDash() {
       + divs.map(d=>'<option value="'+d+'"'+(d===prev?' selected':'')+'>'+d+'</option>').join('');
   }
 
-  const DIVISIONS = Object.values(divMap).sort((a,b)=>a.name.localeCompare(b.name));
-  DIVISIONS.forEach(d=>{
-    d.sections = d.sections.size;
-    d.villages = d.villages.size;
-    const avgNdvi  = d.ndviCount    ? d.ndviSum/d.ndviCount       : null;
-    const prevNdvi = d.prevNdviCount? d.prevNdviSum/d.prevNdviCount: null;
-    const diff = (avgNdvi!=null && prevNdvi!=null) ? avgNdvi - prevNdvi : 0;
-    d.ndviTrend    = (diff>=0?'+':'')+diff.toFixed(2);
-    d.ndviTrendDir = diff>=0 ? 'up' : 'down';
-  });
+  const DIVISIONS = computeDivisionSummary(filterMill, filterDiv);
 
   const totalPlots     = DIVISIONS.reduce((a,d)=>a+d.totalPlots,0);
   const totalMapped    = DIVISIONS.reduce((a,d)=>a+d.mapped,0);
@@ -7953,20 +7963,37 @@ function clearAllNotifs() {
 // =============================================
 function generateReport() {
   goTo('s-report');
-  const totalPlots = DIVISIONS.reduce((a,d)=>a+d.totalPlots,0);
+
+  const DIVISIONS = computeDivisionSummary();
+  const totalPlots  = DIVISIONS.reduce((a,d)=>a+d.totalPlots,0);
   const totalMapped = DIVISIONS.reduce((a,d)=>a+d.mapped,0);
+  const mapPct       = totalPlots ? Math.round(totalMapped/totalPlots*100) : 0;
   const scoutTotals = {unattended:0,scheduled:0,scouted:0,overdue:0,closed:0};
   DIVISIONS.forEach(d=>Object.keys(scoutTotals).forEach(k=>scoutTotals[k]+=d.scout[k]));
+
+  const todayStr = new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+  const monthYear = new Date().toLocaleDateString('en-GB',{month:'long',year:'numeric'});
+  const factoryLabel = currentUser && currentUser.factory_code ? currentUser.factory_code : 'RSCL';
+
+  if(!DIVISIONS.length){
+    document.getElementById('report-body').innerHTML = `
+      <div style="text-align:center;padding:40px 20px;color:#888780">
+        <i class="ti ti-file-off" style="font-size:32px;display:block;margin-bottom:8px;color:#D3D1C7"></i>
+        <div style="font-size:14px;font-weight:600">No field data available for a report yet</div>
+        <div style="font-size:12px;margin-top:4px">Fields will appear here once they've loaded from Supabase.</div>
+      </div>`;
+    return;
+  }
 
   document.getElementById('report-body').innerHTML = `
     <div id="printable-report" style="font-family:'Segoe UI',sans-serif;color:#2C2C2A">
       <!-- Report Header -->
       <div style="background:#1a3a6b;border-radius:10px;padding:14px;margin-bottom:12px;color:#E6F1FB">
-        <div style="font-size:16px;font-weight:700">Rajshree Sugars (RSCL) — RSCL Factory</div>
-        <div style="font-size:12px;opacity:0.8;margin-top:2px">Division Scouting & Crop Health Report · May 2026</div>
+        <div style="font-size:16px;font-weight:700">Rajshree Sugars (RSCL) — ${factoryLabel} Factory</div>
+        <div style="font-size:12px;opacity:0.8;margin-top:2px">Division Scouting & Crop Health Report · ${monthYear}</div>
         <div style="display:flex;gap:16px;margin-top:8px;font-size:11px;opacity:0.75">
-          <span><i class="ti ti-calendar"></i> Generated: 10 May 2026</span>
-          <span><i class="ti ti-map-2"></i> ${DIVISIONS.length} Divisions</span>
+          <span><i class="ti ti-calendar"></i> Generated: ${todayStr}</span>
+          <span><i class="ti ti-map-2"></i> ${DIVISIONS.length} Division${DIVISIONS.length===1?'':'s'}</span>
           <span><i class="ti ti-grain"></i> ${totalPlots} Total Plots</span>
         </div>
       </div>
@@ -7974,7 +8001,7 @@ function generateReport() {
       <!-- Summary KPIs -->
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:12px">
         ${[
-          {l:'Mapped',n:totalMapped+'/'+totalPlots,sub:Math.round(totalMapped/totalPlots*100)+'%',col:'#0F6E56'},
+          {l:'Mapped',n:totalMapped+'/'+totalPlots,sub:mapPct+'%',col:'#0F6E56'},
           {l:'Need Attention',n:DIVISIONS.reduce((a,d)=>a+d.health.attention,0),sub:'Satellite indexed',col:'#994800'},
           {l:'Scout Overdue',n:scoutTotals.overdue,sub:'Immediate action',col:'#a00000'}
         ].map(k=>`
@@ -8004,8 +8031,8 @@ function generateReport() {
             <tbody>
               ${DIVISIONS.map((d,i)=>`
                 <tr style="border-bottom:1px solid #F1EFE8;background:${i%2?'#fafafa':'#fff'}">
-                  <td style="padding:7px 8px;font-weight:600;color:#1a3a6b">${d.name.replace(' Division','')}</td>
-                  <td style="padding:7px 6px;text-align:center">${Math.round(d.mapped/d.totalPlots*100)}%</td>
+                  <td style="padding:7px 8px;font-weight:600;color:#1a3a6b">${d.name}</td>
+                  <td style="padding:7px 6px;text-align:center">${d.totalPlots?Math.round(d.mapped/d.totalPlots*100):0}%</td>
                   <td style="padding:7px 6px;text-align:center;color:#1a7a2e;font-weight:600">${d.health.good}</td>
                   <td style="padding:7px 6px;text-align:center;color:#447f16;font-weight:600">${d.health.optimal}</td>
                   <td style="padding:7px 6px;text-align:center;color:#994800;font-weight:600">${d.health.attention}</td>
@@ -8014,7 +8041,7 @@ function generateReport() {
                 </tr>`).join('')}
               <tr style="background:#EAF3DE;font-weight:700;border-top:2px solid #C0DD97">
                 <td style="padding:7px 8px;color:#27500A">TOTAL</td>
-                <td style="padding:7px 6px;text-align:center">${Math.round(totalMapped/totalPlots*100)}%</td>
+                <td style="padding:7px 6px;text-align:center">${mapPct}%</td>
                 <td style="padding:7px 6px;text-align:center;color:#1a3a6b">${DIVISIONS.reduce((a,d)=>a+d.health.good,0)}</td>
                 <td style="padding:7px 6px;text-align:center;color:#1a3a6b">${DIVISIONS.reduce((a,d)=>a+d.health.optimal,0)}</td>
                 <td style="padding:7px 6px;text-align:center;color:#1a3a6b">${DIVISIONS.reduce((a,d)=>a+d.health.attention,0)}</td>
@@ -8044,18 +8071,23 @@ function generateReport() {
         </div>
       </div>
 
-      <!-- Top Issues -->
+      <!-- Fields Needing Attention by Division (real NDVI-derived counts --
+           replaces the old mock "Top Issues" text, which named specific
+           pests/diseases that aren't tracked per-division in real data) -->
       <div style="background:#fff;border-radius:10px;border:1px solid #e8e4da;padding:11px 12px;margin-bottom:12px">
-        <div style="font-size:11px;font-weight:700;color:#5F5E5A;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px">Top Issues by Division</div>
+        <div style="font-size:11px;font-weight:700;color:#5F5E5A;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px">Fields Needing Attention by Division</div>
         ${DIVISIONS.map(d=>`
           <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #F1EFE8">
-            <span style="font-size:11px;font-weight:600;color:#1a3a6b">${d.name.replace(' Division','')}</span>
-            <span style="font-size:10px;color:#994800"><i class="ti ti-bug" style="font-size:10px"></i> ${d.topProblem}</span>
+            <span style="font-size:11px;font-weight:600;color:#1a3a6b">${d.name}</span>
+            <span style="font-size:10px;color:${d.health.attention?'#994800':'#3B6D11'}">
+              <i class="ti ${d.health.attention?'ti-alert-triangle':'ti-check'}" style="font-size:10px"></i>
+              ${d.health.attention ? d.health.attention+' field'+(d.health.attention===1?'':'s')+' need attention' : 'All indexed fields on track'}
+            </span>
           </div>`).join('')}
       </div>
 
       <div style="text-align:center;font-size:9px;color:#B4B2A9;padding:8px 0">
-        Farm Signal GeoTag · Rajshree Sugars (RSCL) · Generated 10 May 2026
+        Farm Signal GeoTag · Rajshree Sugars (RSCL) · Generated ${todayStr}
       </div>
     </div>`;
 }
@@ -8063,8 +8095,10 @@ function generateReport() {
 function printReport() {
   const content = document.getElementById('printable-report');
   if(!content){ alert('Please generate the report first.'); return; }
+  const todayStr = new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+  const factoryLabel = currentUser && currentUser.factory_code ? currentUser.factory_code : 'RSCL';
   const win = window.open('','_blank');
-  win.document.write(`<!DOCTYPE html><html><head><title>Scouting Report - RSCL Factory - May 2026</title>
+  win.document.write(`<!DOCTYPE html><html><head><title>Scouting Report - ${factoryLabel} Factory - ${todayStr}</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css"/>
     <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Segoe UI',sans-serif;padding:16px;color:#2C2C2A}
     @media print{button{display:none}}</style></head>
