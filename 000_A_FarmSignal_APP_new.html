@@ -331,7 +331,7 @@ body {
           <i class="ti ti-map-2" style="font-size:16px"></i>
           <span style="font-size:8px;font-weight:600;letter-spacing:0.02em">Map</span>
         </button>
-        <button data-role="planner" onclick="goTo('s-scout-alerts');renderScoutAlerts()"
+        <button data-role="planner" onclick="goTo('s-scout-alerts');plannerTab='scout';renderScoutAlerts()"
           style="position:relative;display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;cursor:pointer;color:#f07c2a;padding:2px 4px;min-width:40px">
           <i class="ti ti-calendar-check" style="font-size:16px"></i>
           <span id="scout-alert-dot" style="position:absolute;top:-2px;right:4px;background:#f07c2a;color:#fff;font-size:7px;font-weight:700;min-width:13px;height:13px;border-radius:7px;display:flex;align-items:center;justify-content:center;border:1.5px solid #1a3a2a;padding:0 2px">0</span>
@@ -811,7 +811,7 @@ body {
            background:rgba(139,69,0,0.88);color:#FFE0B8;font-size:10px;font-weight:700;
            padding:5px 12px;border-radius:20px;z-index:800;display:none;
            align-items:center;gap:6px;white-space:nowrap;cursor:pointer"
-           onclick="goTo('s-scout-alerts');renderScoutAlerts()">
+           onclick="goTo('s-scout-alerts');plannerTab='scout';renderScoutAlerts()">
         <i class="ti ti-alert-triangle" style="font-size:12px"></i>
         <span id="map-attention-count">0</span> Need Attention · Tap to Scout
       </div>
@@ -1343,7 +1343,7 @@ body {
           <i class="ti ti-map-2" style="font-size:16px"></i>
           <span style="font-size:8px;font-weight:600;letter-spacing:0.02em">Map</span>
         </button>
-        <button data-role="planner" onclick="goTo('s-scout-alerts');renderScoutAlerts()"
+        <button data-role="planner" onclick="goTo('s-scout-alerts');plannerTab='scout';renderScoutAlerts()"
           style="position:relative;display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;cursor:pointer;color:#f07c2a;padding:2px 4px;min-width:40px">
           <i class="ti ti-calendar-check" style="font-size:16px"></i>
           <span style="font-size:8px;font-weight:600;letter-spacing:0.02em">Planner</span>
@@ -1566,7 +1566,36 @@ body {
         <i class="ti ti-map-2" style="font-size:13px"></i>
       </button>
     </div>
+
+    <!-- Scout / Survey tab switcher -->
+    <div style="display:flex;background:#6B3400;padding:0 12px">
+      <button id="planner-tab-scout" onclick="setPlannerTab('scout')"
+        style="flex:1;padding:9px;border:none;background:none;cursor:pointer;
+        font-size:12px;font-weight:700;color:#FFE0B8;border-bottom:2px solid #FFE0B8">
+        <i class="ti ti-binoculars" style="font-size:13px"></i> Scout
+      </button>
+      <button id="planner-tab-survey" onclick="setPlannerTab('survey')"
+        style="flex:1;padding:9px;border:none;background:none;cursor:pointer;
+        font-size:12px;font-weight:600;color:rgba(255,224,184,0.5);border-bottom:2px solid transparent">
+        <i class="ti ti-clipboard-check" style="font-size:13px"></i> Survey
+      </button>
+    </div>
+
     <div class="body">
+      <!-- Search bar -->
+      <div style="position:relative;margin-bottom:10px">
+        <i class="ti ti-search" style="position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:14px;color:#888780;pointer-events:none"></i>
+        <input id="planner-search" type="text" placeholder="Search village, farmer, plot no…"
+          oninput="renderScoutAlerts()"
+          style="width:100%;padding:9px 32px 9px 34px;border-radius:10px;border:1px solid #D3D1C7;
+          font-size:12px;background:#fff;color:#2C2C2A;outline:none;font-family:inherit"/>
+        <button id="planner-search-clear" onclick="document.getElementById('planner-search').value='';renderScoutAlerts()"
+          style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);
+          background:none;border:none;cursor:pointer;font-size:14px;color:#888780;padding:2px">
+          <i class="ti ti-x"></i>
+        </button>
+      </div>
+
       <!-- Calendar strip -->
       <div style="background:#fff;border-radius:12px;border:1px solid #e8e4da;padding:10px 12px;margin-bottom:10px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -4425,6 +4454,23 @@ function hideScoutBanner() {
 // SCOUT MODULE
 // =============================================
 let scoutFilter = 'all';
+let plannerTab  = 'scout';
+
+function setPlannerTab(tab){
+  plannerTab = tab;
+  const sb = document.getElementById('planner-tab-scout');
+  const sv = document.getElementById('planner-tab-survey');
+  if(sb && sv){
+    sb.style.color = tab==='scout' ? '#FFE0B8' : 'rgba(255,224,184,0.5)';
+    sb.style.borderBottomColor = tab==='scout' ? '#FFE0B8' : 'transparent';
+    sb.style.fontWeight = tab==='scout' ? '700' : '600';
+    sv.style.color = tab==='survey' ? '#FFE0B8' : 'rgba(255,224,184,0.5)';
+    sv.style.borderBottomColor = tab==='survey' ? '#FFE0B8' : 'transparent';
+    sv.style.fontWeight = tab==='survey' ? '700' : '600';
+  }
+  if(tab==='scout')  renderScoutAlerts();
+  else               renderSurveyAlerts();
+}
 let scheduleModalIdx = null;
 
 // ── Schedule modal ─────────────────────────────────────────────────────────
@@ -4634,7 +4680,20 @@ function renderScoutAlerts() {
   if(li && scoutFilter!=='all') li.className = 'ti '+STATUS_CFG[scoutFilter].icon;
 
   // Filter list
+  // Apply search filter
+  const searchQ = (document.getElementById('planner-search')||{value:''}).value.trim().toLowerCase();
+  const clearBtn = document.getElementById('planner-search-clear');
+  if(clearBtn) clearBtn.style.display = searchQ ? 'block' : 'none';
+
   let filtered = scoutFilter==='all' ? attn : attn.filter(f=>getScoutStatus(f.code).type===scoutFilter);
+  if(searchQ){
+    filtered = filtered.filter(f=>
+      f.name.toLowerCase().includes(searchQ) ||
+      f.village.toLowerCase().includes(searchQ) ||
+      f.code.toLowerCase().includes(searchQ) ||
+      (f.division||'').toLowerCase().includes(searchQ)
+    );
+  }
 
   if(filtered.length===0) {
     document.getElementById('scout-alert-list').innerHTML = `
