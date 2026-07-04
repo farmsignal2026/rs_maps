@@ -827,7 +827,7 @@ body {
         <i class="ti ti-current-location" style="font-size:18px;color:#27500A"></i>
       </button>
 
-      <!-- Scout mode banner — shown when opened from Scout Alerts -->
+      <!-- Scout/Survey mode banner — shown when opened from Planner -->
       <div id="scout-map-banner" style="display:none;position:absolute;bottom:10px;left:10px;right:10px;
            z-index:850;background:#8B4500;border-radius:12px;padding:10px 14px;
            box-shadow:0 4px 16px rgba(0,0,0,0.25);display:none;flex-direction:column;gap:8px">
@@ -836,20 +836,24 @@ body {
             <div style="font-size:12px;font-weight:700;color:#FFE0B8" id="scout-banner-name">–</div>
             <div style="font-size:10px;color:#FFC080" id="scout-banner-sub">Tap field to view crop health</div>
           </div>
-          <span style="background:rgba(240,124,42,0.3);color:#FFC080;font-size:9px;font-weight:700;
+          <span id="scout-map-banner-mode" style="background:rgba(240,124,42,0.3);color:#FFC080;font-size:9px;font-weight:700;
             padding:3px 8px;border-radius:5px;border:1px solid rgba(240,124,42,0.5)">
             <i class="ti ti-binoculars" style="font-size:10px"></i> SCOUT MODE
           </span>
         </div>
-        <button onclick="openScoutForm(pendingScoutIdx)"
+        <div id="scout-map-banner-hint" style="font-size:10px;color:#FFC080;display:flex;align-items:center;gap:5px">
+          <i class="ti ti-map-pin" style="font-size:11px"></i> Must be within 25m of the field to collect data
+        </div>
+        <button id="scout-map-banner-btn"
           style="width:100%;padding:9px;border-radius:8px;background:#FFE0B8;color:#8B4500;
           border:none;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;
           justify-content:center;gap:7px">
-          <i class="ti ti-binoculars" style="font-size:16px"></i>
-          Start Target Scout →
+          <i class="ti ti-binoculars" style="font-size:16px" id="scout-map-banner-btn-icon"></i>
+          <span id="scout-map-banner-btn-label">Start Target Scout →</span>
         </button>
       </div>
     </div>
+
 
     <!-- Field detail bottom panel -->
     <div id="field-detail-panel" style="position:absolute;bottom:0;left:0;right:0;
@@ -948,7 +952,7 @@ body {
         </div>
       </div>
       <!-- Scout button — shown only in scout mode (pendingScoutIdx set) -->
-      <button id="dp-scout-btn" onclick="openScoutForm(pendingScoutIdx)"
+      <button id="dp-scout-btn"
         style="display:none;width:100%;margin:0 0 8px;padding:12px;border-radius:10px;
         background:#8B4500;color:#FFE0B8;border:none;font-size:14px;font-weight:700;
         cursor:pointer;align-items:center;justify-content:center;gap:8px">
@@ -3829,7 +3833,7 @@ function showFieldDetailPanel(geoItem){
   document.getElementById('field-detail-panel').style.transform='translateY(0)';
 }
 
-function geoFencedScout(geoItem, type){
+function geoFencedScout(geoItem, type, stageKey, btnIdOverride){
   const f = getFieldByCode(geoItem.code);
   if(!f){ alert('Field not found.'); return; }
 
@@ -3842,7 +3846,7 @@ function geoFencedScout(geoItem, type){
   }
 
   // Show loading state
-  const btn = document.getElementById(type==='scout' ? 'dp-scout-btn' : 'dp-survey-btn');
+  const btn = document.getElementById(btnIdOverride || (type==='scout' ? 'dp-scout-btn' : 'dp-survey-btn'));
   const origHTML = btn ? btn.innerHTML : '';
   if(btn){ btn.disabled=true; btn.innerHTML='<i class="ti ti-loader-2" style="font-size:14px"></i> Checking GPS...'; }
 
@@ -3861,7 +3865,7 @@ function geoFencedScout(geoItem, type){
           return;
         }
         // Proceed without geo check for now
-        launchScoutOrSurvey(f, type);
+        launchScoutOrSurvey(f, type, stageKey);
         return;
       }
 
@@ -3869,30 +3873,36 @@ function geoFencedScout(geoItem, type){
       console.log('GPS dist to field:', dist.toFixed(1)+'m, accuracy:', acc.toFixed(1)+'m');
 
       if(dist > FENCE_M + acc){ // account for GPS accuracy
-        alert('You are ' + Math.round(dist) + 'm from this field.\n\nPlease move within 25m of the field to submit a scout report.\n\nThis ensures data is collected from the actual field.');
+        alert('You are ' + Math.round(dist) + 'm from this field.\n\nPlease move within 25m of the field to submit a '+(type==='survey'?'survey':'scout')+' report.\n\nThis ensures data is collected from the actual field.');
         return;
       }
 
-      launchScoutOrSurvey(f, type);
+      launchScoutOrSurvey(f, type, stageKey);
     },
     err => {
       if(btn){ btn.disabled=false; btn.innerHTML=origHTML; }
       // GPS unavailable -- ask officer to confirm they are at the field
       if(confirm('Could not get GPS location.\n\nAre you physically at the field "'+f.name+'" ('+f.code+')?\n\nTap OK only if you are at the field.')){
-        launchScoutOrSurvey(f, type);
+        launchScoutOrSurvey(f, type, stageKey);
       }
     },
     {timeout:10000, enableHighAccuracy:true, maximumAge:15000}
   );
 }
 
-function launchScoutOrSurvey(f, type){
+function launchScoutOrSurvey(f, type, stageKey){
   const idx = fields.indexOf(f);
   if(idx < 0){ alert('Field not in current list.'); return; }
   selectedIdx = idx;
   closeDetailPanel();
+  hideScoutBanner();
   if(type === 'scout'){
     openScoutForm(f.code);
+  } else if(stageKey){
+    // Exact stage was already chosen (e.g. from the Planner's "Survey Now"
+    // button for a specific stage) -- open it directly.
+    goTo('s-survey-form');
+    openSurveyForm(f.code, stageKey);
   } else {
     goTo('s-survey-form');
     if(typeof startSurveyForField === 'function') startSurveyForField(idx);
@@ -4216,6 +4226,22 @@ function openScoutMapView(code) {
   });
 }
 
+function openSurveyMapView(code, stageKey) {
+  pendingScoutIdx = code;
+  const geo = getGeoByCode(code);
+  const f   = getFieldByCode(code);
+
+  openMapView(() => {
+    showSurveyBanner(code, stageKey);
+    if(geo && geo.centroid && leafletMap) {
+      zoomToField(geo);
+    } else if(leafletMap && f) {
+      leafletMap.setView([10.875, 78.855], 13);
+      setTimeout(() => alert(`${f.name}'s field boundary has not been GeoTagged yet.\nYou can proceed directly to Survey.`), 300);
+    }
+  });
+}
+
 const SUB_CATS = {
   'Pest':        ['Shoot Borer','Top Borer','Woolly Aphid','Mealybug','Scale Insect','White Grub','Termite'],
   'Disease':     ['Red Rot','Smut','Wilt','Leaf Scald','Ratoon Stunting','Grassy Shoot'],
@@ -4432,22 +4458,76 @@ function setProbIntensity(cat, intensity) {
 function selectProbCat(cat) { toggleProbCat(cat); }
 function selectIntensity(val) { scoutState.intensity = val; }
 
+// Which field/type/stage the map banner's button should act on.
+let mapBannerGeoFence = null; // {type:'scout'|'survey', code, stageKey}
+
 function showScoutBanner(code) {
   const f = getFieldByCode(code);
   if(!f) return;
   const banner = document.getElementById('scout-map-banner');
   if(!banner) return;
   banner.style.display = 'flex';
+  banner.style.background = '#8B4500';
   // Hide the general attention badge — scout banner takes over
   const badge = document.getElementById('map-attention-badge');
   if(badge) badge.style.display = 'none';
   document.getElementById('scout-banner-name').textContent = f.name + ' · ' + f.code;
   document.getElementById('scout-banner-sub').textContent = f.village + ' · ' + f.area + ' Ac · Need Attention';
+  const modeEl = document.getElementById('scout-map-banner-mode');
+  if(modeEl) modeEl.innerHTML = '<i class="ti ti-binoculars" style="font-size:10px"></i> SCOUT MODE';
+  const btnIcon = document.getElementById('scout-map-banner-btn-icon');
+  if(btnIcon) btnIcon.className = 'ti ti-binoculars';
+  const btnLbl = document.getElementById('scout-map-banner-btn-label');
+  if(btnLbl) btnLbl.textContent = 'Start Target Scout →';
+
+  mapBannerGeoFence = { type:'scout', code };
+  const btn = document.getElementById('scout-map-banner-btn');
+  if(btn) btn.onclick = confirmMapBannerGeofence;
+}
+
+function showSurveyBanner(code, stageKey) {
+  const f = getFieldByCode(code);
+  if(!f) return;
+  const banner = document.getElementById('scout-map-banner');
+  if(!banner) return;
+  banner.style.display = 'flex';
+  banner.style.background = '#0C447C';
+  const badge = document.getElementById('map-attention-badge');
+  if(badge) badge.style.display = 'none';
+  const stage = SURVEY_STAGES.find(s=>s.key===stageKey);
+  document.getElementById('scout-banner-name').textContent = f.name + ' · ' + f.code;
+  document.getElementById('scout-banner-sub').textContent = f.village + ' · ' + f.area + ' Ac' + (stage?' · '+stage.label+' Stage':'');
+  const modeEl = document.getElementById('scout-map-banner-mode');
+  if(modeEl){
+    modeEl.style.background = 'rgba(24,95,165,0.3)';
+    modeEl.style.borderColor = 'rgba(24,95,165,0.5)';
+    modeEl.innerHTML = '<i class="ti ti-clipboard-check" style="font-size:10px"></i> SURVEY MODE';
+  }
+  const btnIcon = document.getElementById('scout-map-banner-btn-icon');
+  if(btnIcon) btnIcon.className = 'ti ti-clipboard-check';
+  const btnLbl = document.getElementById('scout-map-banner-btn-label');
+  if(btnLbl) btnLbl.textContent = 'Start Survey →';
+
+  mapBannerGeoFence = { type:'survey', code, stageKey };
+  const btn = document.getElementById('scout-map-banner-btn');
+  if(btn) btn.onclick = confirmMapBannerGeofence;
+}
+
+// Runs the same 25m geofence check used by the map detail-panel buttons,
+// but for whichever field/stage the Planner's "Scout Now"/"Survey Now"
+// button sent us here for.
+function confirmMapBannerGeofence(){
+  if(!mapBannerGeoFence) return;
+  const { type, code, stageKey } = mapBannerGeoFence;
+  const geo = getGeoByCode(code);
+  if(!geo){ alert('Field location not found.'); return; }
+  geoFencedScout(geo, type, stageKey, 'scout-map-banner-btn');
 }
 
 function hideScoutBanner() {
   const banner = document.getElementById('scout-map-banner');
   if(banner) banner.style.display = 'none';
+  mapBannerGeoFence = null;
 }
 
 // =============================================
@@ -7413,7 +7493,7 @@ function renderSurveyAlerts() {
             style="flex:1;padding:6px;border-radius:7px;background:#EAF3DE;color:#3B6D11;
             border:1px solid #C0DD97;font-size:11px;font-weight:600;cursor:pointer">
             <i class="ti ti-calendar-plus"></i> Schedule</button>
-          <button onclick="openSurveyForm('${f.code}','${s.key}')"
+          <button onclick="openSurveyMapView('${f.code}','${s.key}')"
             style="flex:1;padding:6px;border-radius:7px;background:#0C447C;color:#E6F1FB;
             border:none;font-size:11px;font-weight:600;cursor:pointer">
             <i class="ti ti-clipboard-check"></i> Survey Now</button>`;
@@ -7422,12 +7502,12 @@ function renderSurveyAlerts() {
             style="flex:1;padding:6px;border-radius:7px;background:#dbeafe;color:#1d4ed8;
             border:1px solid #93c5fd;font-size:11px;font-weight:600;cursor:pointer">
             <i class="ti ti-edit"></i> Reschedule</button>
-          <button onclick="openSurveyForm('${f.code}','${s.key}')"
+          <button onclick="openSurveyMapView('${f.code}','${s.key}')"
             style="flex:1;padding:6px;border-radius:7px;background:#0C447C;color:#E6F1FB;
             border:none;font-size:11px;font-weight:600;cursor:pointer">
             <i class="ti ti-clipboard-check"></i> Survey Now</button>`;
         else if(s.status==='overdue') actionBtns = `
-          <button onclick="openSurveyForm('${f.code}','${s.key}')"
+          <button onclick="openSurveyMapView('${f.code}','${s.key}')"
             style="width:100%;padding:6px;border-radius:7px;background:#a00000;color:#fff;
             border:none;font-size:11px;font-weight:600;cursor:pointer">
             <i class="ti ti-alarm"></i> ⚠ Survey Now (Overdue)</button>`;
