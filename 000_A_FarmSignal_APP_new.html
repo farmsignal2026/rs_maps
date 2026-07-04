@@ -2329,10 +2329,17 @@ function getScopedFields() {
   // Admin sees everything
   if(u.role === 'admin') return ALL_FIELDS;
 
-  // Manager sees all plots in their factory (no division filter)
+  // Manager — factory-wide unless specific divisions are assigned
   if(u.role === 'manager'){
     if(!u.factory_code) return ALL_FIELDS;
-    return ALL_FIELDS.filter(f => f.factoryCode === u.factory_code);
+    let scoped = ALL_FIELDS.filter(f => f.factoryCode === u.factory_code);
+    // If manager has specific divisions assigned, filter to those divisions
+    const divCodes = u.division_codes || [];
+    if(divCodes.length > 0){
+      const codeSet = new Set(divCodes.map(c => c.toUpperCase()));
+      scoped = scoped.filter(f => codeSet.has((f.divisionCode||'').toUpperCase()));
+    }
+    return scoped;
   }
 
   // Officer / viewer — filter by factory + exact division codes
@@ -5699,9 +5706,9 @@ async function doLogin() {
 
     const officer = officers[0];
 
-    // Fetch all assigned divisions from officer_divisions (multi-division support)
+    // Fetch all assigned divisions from officer_divisions (officers AND zonal managers)
     let divisionCodes = [];
-    if(officer.role === 'officer' || officer.role === 'viewer'){
+    if(officer.role === 'officer' || officer.role === 'viewer' || officer.role === 'manager'){
       const {data:odRows, error:odErr} = await _sb
         .from('officer_divisions')
         .select('division_code')
