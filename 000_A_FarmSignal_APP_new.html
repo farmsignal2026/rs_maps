@@ -1311,7 +1311,7 @@ body {
         onfocus="this.style.borderColor='#0C447C'" onblur="this.style.borderColor='#D3D1C7'"></textarea>
     </div>
     <div class="bottom-actions">
-      <button class="action-btn primary" onclick="submitSurvey()" style="background:#0C447C;margin:0">
+      <button id="survey-submit-btn" class="action-btn primary" onclick="submitSurvey()" style="background:#0C447C;margin:0">
         <i class="ti ti-send" style="font-size:18px"></i> Submit Survey
       </button>
       <button class="action-btn secondary" onclick="goBack()" style="margin:0">
@@ -2198,6 +2198,14 @@ async function syncOfflineQueue(){
         if(item.type === 'scout_report'){
           const {error} = await _sb.from('scout_reports').insert(item.payload);
           if(!error){ await cacheDelete('sync_queue', item.id); synced++; }
+        }
+        else if(item.type === 'survey_report'){
+          const {data:ins, error} = await _sb.from('surveys').insert(item.payload.surveyRow).select('id');
+          if(!error && ins && ins[0]){
+            const rows = (item.payload.values||[]).filter(v=>v.parameter_id).map(v=>({...v, survey_id: ins[0].id}));
+            if(rows.length) await _sb.from('survey_values').insert(rows);
+            await cacheDelete('sync_queue', item.id); synced++;
+          }
         }
         else if(item.type === 'boundary'){
           const {error} = await _sb.rpc('upsert_plot_boundary', {
@@ -4607,7 +4615,7 @@ async function confirmSchedule() {
   if(!val){ alert('Please pick a date.'); return; }
 
   // Handle survey scheduling mode
-  if(handleSurveyScheduleConfirm(val)) return;
+  if(await handleSurveyScheduleConfirm(val)) return;
 
   const code = scheduleModalIdx;
   if(!code){ alert('No field selected.'); return; }
@@ -5363,6 +5371,8 @@ async function resolveLatestFileURLs(){
 let fieldDataLoaded=false;
 let divCodeMap = {}; // division_code -> name, built during Supabase load
 let scoutByPlot = {}; // plot_no -> [scout_reports] loaded from Supabase
+let SURVEY_STAGE_IDS = {}; // stage_key -> survey_stages.id, cached at login
+let SURVEY_PARAM_IDS = {}; // `${stage_key}_${param_key}` -> survey_parameters.id, cached at login
 
 // Parses a planting date from the GeoJSON's DOP property -- handles a
 // plain ISO/locale date string, or an Excel serial number (in case it
@@ -5664,6 +5674,40 @@ async function loadFieldDataFromSupabase(){
       scoutByPlot[r.plot_no].push(r);
     });
     console.log('Scout reports loaded:', (srData||[]).length);
+
+    // Fetch survey stage/parameter reference data (rarely changes -- cached
+    // for the session so submitSurvey() can resolve stage_id/parameter_id
+    // without an extra round-trip per submission).
+    const [stageRefRes, paramRefRes] = await Promise.all([
+      _sb.from('survey_stages').select('id,stage_key'),
+      _sb.from('survey_parameters').select('id,param_key,stage_id,survey_stages(stage_key)')
+    ]);
+    SURVEY_STAGE_IDS = {};
+    (stageRefRes.data||[]).forEach(s=>{ SURVEY_STAGE_IDS[s.stage_key] = s.id; });
+    SURVEY_PARAM_IDS = {};
+    (paramRefRes.data||[]).forEach(p=>{
+      const skey = p.survey_stages && p.survey_stages.stage_key;
+      if(skey) SURVEY_PARAM_IDS[skey+'_'+p.param_key] = p.id;
+    });
+    console.log('Survey reference data loaded:', Object.keys(SURVEY_STAGE_IDS).length, 'stages,', Object.keys(SURVEY_PARAM_IDS).length, 'parameters');
+
+    // Fetch latest survey status per plot+stage for the Survey Planner --
+    // populates surveyDB in the exact shape getSurveyStages() already reads.
+    surveyDB = {};
+    const {data:svData, error:svErr} = await _sb
+      .from('survey_latest_status')
+      .select('plot_no,stage_key,survey_date,scheduled_date,remarks,photo_urls');
+    if(svErr) console.error('survey_latest_status load error:', svErr);
+    (svData||[]).forEach(r=>{
+      const dbKey = r.plot_no+'_'+r.stage_key;
+      surveyDB[dbKey] = {
+        scheduledDate: r.scheduled_date || null,
+        surveyDate:    r.survey_date || null,
+        remarks:       r.remarks || '',
+        photoUrls:     r.photo_urls || []
+      };
+    });
+    console.log('Survey status loaded:', (svData||[]).length);
 
     const withNdvi = newGeo.filter(g=>g.ndvi!==null).length;
     const withBnd  = newGeo.filter(g=>g.polygon).length;
@@ -7273,7 +7317,7 @@ function cropAge(dateStr) {
   const months = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
   const [d,m,y] = dateStr.split(' ');
   const planted = new Date(+y, months[m], +d);
-  return Math.floor((new Date('2026-05-10') - planted) / (1000*60*60*24));
+  return Math.floor((new Date() - planted) / (1000*60*60*24));
 }
 
 // Return stages with status for a field
@@ -7292,7 +7336,7 @@ function getSurveyStages(f) {
     if(db.surveyDate) {
       status = 'surveyed';
     } else if(db.scheduledDate) {
-      const daysPast = Math.floor((new Date('2026-05-10') - new Date(db.scheduledDate)) / (1000*60*60*24));
+      const daysPast = Math.floor((new Date() - new Date(db.scheduledDate)) / (1000*60*60*24));
       status = daysPast > 3 ? 'overdue' : 'scheduled';
     } else {
       status = 'unattended';
@@ -7333,19 +7377,49 @@ function openSurveyScheduleModal(code, stageKey) {
 }
 
 // confirmSchedule is defined above as async -- this block handles survey mode only
-function handleSurveyScheduleConfirm(val) {
-  if(window._surveyScheduleMode) {
-    const { code, stageKey } = surveyScheduleModal;
-    const dbKey = code + '_' + stageKey;
-    surveyDB[dbKey] = surveyDB[dbKey] || {};
-    surveyDB[dbKey].scheduledDate = val;
-    delete surveyDB[dbKey].surveyDate;
-    window._surveyScheduleMode = false;
-    closeScheduleModal();
-    renderSurveyAlerts();
-    return true;
+async function handleSurveyScheduleConfirm(val) {
+  if(!window._surveyScheduleMode) return false;
+
+  const { code, stageKey } = surveyScheduleModal;
+  const dbKey  = code + '_' + stageKey;
+  const stageId = SURVEY_STAGE_IDS[stageKey] || null;
+  const f = getFieldByCode(code);
+
+  const btn = document.getElementById('sched-confirm-btn');
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="ti ti-loader-2"></i> Saving...'; }
+
+  try {
+    if(!stageId) throw new Error('Survey stage reference data not loaded.');
+    const surveyRow = {
+      plot_no:       code,
+      stage_id:      stageId,
+      crop_age_days: f ? cropAge(f.date) : null,
+      scheduled_date: val,
+      status:        'scheduled',
+      remarks:       'Survey scheduled by ' + (currentUser ? currentUser.name : 'manager'),
+    };
+    const {error} = await _sb.from('surveys').insert(surveyRow);
+    if(error) throw error;
+    showSyncToast('Survey scheduled for ' + fmtDate(val));
+  } catch(e){
+    console.warn('Survey schedule save failed, queuing offline:', e.message);
+    await queueOfflineAction('survey_report', {
+      surveyRow: { plot_no:code, stage_id:stageId, scheduled_date:val, status:'scheduled' },
+      values: []
+    });
+    showSyncToast('Saved offline -- will sync when online');
   }
-  return false;
+
+  // Update local surveyDB immediately regardless of network outcome
+  surveyDB[dbKey] = surveyDB[dbKey] || {};
+  surveyDB[dbKey].scheduledDate = val;
+  delete surveyDB[dbKey].surveyDate;
+
+  if(btn){ btn.disabled=false; btn.innerHTML='<i class="ti ti-check"></i> Confirm Schedule'; }
+  window._surveyScheduleMode = false;
+  closeScheduleModal();
+  renderSurveyAlerts();
+  return true;
 }
 
 function renderSurveyCalendar() {
@@ -7577,7 +7651,7 @@ function openSurveyForm(code, stageKey) {
   const stage = SURVEY_STAGES.find(s=>s.key===stageKey);
   if(!f||!stage) return;
 
-  surveyState = { fieldCode:code, stageKey, values:{}, photos:[false,false,false] };
+  surveyState = { fieldCode:code, stageKey, values:{}, photos:[false,false,false], photoData:[null,null,null] };
 
   document.getElementById('svf-name').textContent = f.name;
   document.getElementById('svf-code').textContent = f.code + ' · ' + f.section;
@@ -7642,30 +7716,198 @@ function selectSurveyVal(key, val, btn) {
 }
 
 function captureSurveyPhoto(i) {
-  surveyState.photos[i] = true;
-  const el = document.getElementById('svp'+i);
-  el.className = 'photo-slot filled';
-  el.innerHTML = `<i class="ti ti-check" style="font-size:22px"></i><span style="font-size:10px">Photo ${i+1} ✓</span>`;
+  const slot = document.getElementById('svp'+i);
+  slot.innerHTML = '<i class="ti ti-loader-2" style="font-size:14px"></i><span style="font-size:9px;display:block;margin-top:2px">Getting GPS...</span>';
+
+  // Start GPS request immediately, before opening the camera
+  let gpsPromise = new Promise((res) => {
+    navigator.geolocation.getCurrentPosition(
+      pos => res({lat: parseFloat(pos.coords.latitude.toFixed(6)), lng: parseFloat(pos.coords.longitude.toFixed(6))}),
+      ()  => navigator.geolocation.getCurrentPosition(
+        pos => res({lat: parseFloat(pos.coords.latitude.toFixed(6)), lng: parseFloat(pos.coords.longitude.toFixed(6))}),
+        ()  => res({lat:null, lng:null}),
+        {timeout:20000, enableHighAccuracy:false, maximumAge:30000}
+      ),
+      {timeout:15000, enableHighAccuracy:true, maximumAge:0}
+    );
+  });
+
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+  if(isMobile) input.capture = 'environment';
+  input.style.display = 'none';
+  document.body.appendChild(input);
+
+  input.onchange = async () => {
+    const file = input.files && input.files[0];
+    document.body.removeChild(input);
+    if(!file){
+      slot.className = 'photo-slot';
+      slot.innerHTML = '<i class="ti ti-camera"></i><span style="font-size:10px">Photo '+(i+1)+'*</span>';
+      return;
+    }
+
+    slot.innerHTML = '<i class="ti ti-loader-2" style="font-size:14px"></i><span style="font-size:9px;display:block;margin-top:2px">Waiting GPS...</span>';
+    const {lat, lng} = await gpsPromise;
+
+    const now       = new Date();
+    const timestamp = now.toISOString();
+    const dateStr   = now.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+    const timeStr   = now.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+
+    if(!surveyState.photoData) surveyState.photoData = [null,null,null];
+    surveyState.photoData[i] = { file, lat, lng, timestamp };
+    surveyState.photos[i] = true;
+
+    const reader = new FileReader();
+    reader.onload = e => {
+      slot.className = 'photo-slot filled';
+      slot.style.backgroundImage = 'url('+e.target.result+')';
+      slot.style.backgroundSize  = 'cover';
+      slot.style.backgroundPosition = 'center';
+      slot.style.position = 'relative';
+      slot.style.overflow = 'hidden';
+      slot.innerHTML =
+        '<div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.65);padding:2px 4px">'
+        +'<div style="color:#fff;font-size:8px;font-weight:600">'+dateStr+' '+timeStr+'</div>'
+        +(lat
+          ?'<div style="color:#9fd8ae;font-size:8px">'+lat+', '+lng+'</div>'
+          :'<div style="color:#fca5a5;font-size:8px">No GPS</div>')
+        +'</div>';
+    };
+    reader.readAsDataURL(file);
+  };
+
+  document.body.appendChild(input);
+  setTimeout(()=>input.click(), 300);
 }
 
-function submitSurvey() {
+async function uploadSurveyPhotos(fieldCode, surveyId) {
+  const urls = [];
+  const data = surveyState.photoData || [];
+  for(let i=0;i<data.length;i++){
+    const pd = data[i];
+    if(!pd || !pd.file) continue;
+    try {
+      const ext  = pd.file.name.split('.').pop() || 'jpg';
+      const factoryPrefix = currentUser && currentUser.factory_code ? currentUser.factory_code : 'RSCL';
+      const path = factoryPrefix+'/'+fieldCode+'/survey/'+surveyId+'_'+(i+1)+'.'+ext;
+
+      const {error:upErr} = await _sb.storage
+        .from('field-photos')
+        .upload(path, pd.file, {upsert:true, contentType: pd.file.type||'image/jpeg'});
+      if(upErr){ console.error('Survey photo upload error', i+1, ':', upErr); continue; }
+
+      const url = SB_URL+'/storage/v1/object/public/field-photos/'+path;
+      urls.push(url);
+
+      const {error:dbErr} = await _sb.from('field_photos').insert({
+        plot_no:      fieldCode,
+        storage_path: path,
+        source:       'survey',
+        taken_at:     pd.timestamp,
+      });
+      if(dbErr) console.error('field_photos insert error (survey):', dbErr);
+    } catch(e){ console.error('Survey photo', i+1, 'upload exception:', e.message); }
+  }
+  return urls;
+}
+
+async function submitSurvey() {
   if(!surveyState.photos.every(Boolean)) { alert('Please capture all 3 photos.'); return; }
   const stage = SURVEY_STAGES.find(s=>s.key===surveyState.stageKey);
   // Check all grade3 params filled
   const missing = stage.params.filter(p=>p.type==='grade3' && !surveyState.values[p.key]);
   if(missing.length) { alert(`Please grade: ${missing.map(p=>p.label).join(', ')}`); return; }
 
-  const dbKey2 = `${surveyState.fieldCode}_${surveyState.stageKey}`;
-  surveyDB[dbKey2] = {
-    ...(surveyDB[dbKey2]||{}),
-    surveyDate: '2026-05-10',
-    values: {...surveyState.values},
-    remarks: document.getElementById('survey-remarks').value || '–'
+  const btn = document.getElementById('survey-submit-btn');
+  const origHTML = btn ? btn.innerHTML : '';
+  if(btn){ btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2" style="font-size:18px"></i> Saving...'; }
+
+  const fieldCode = surveyState.fieldCode;
+  const stageKey  = surveyState.stageKey;
+  const sf        = getFieldByCode(fieldCode);
+  const today     = new Date().toISOString().slice(0,10);
+  const remarks   = (document.getElementById('survey-remarks')||{}).value || null;
+  const ageAtSurvey = sf ? cropAge(sf.date) : null;
+  const stageId   = SURVEY_STAGE_IDS[stageKey] || null;
+
+  // Resolve each answered parameter to its survey_parameters.id
+  const valuesPayload = Object.entries(surveyState.values).map(([paramKey,val])=>{
+    const param = stage.params.find(p=>p.key===paramKey);
+    return {
+      parameter_id:  SURVEY_PARAM_IDS[stageKey+'_'+paramKey] || null,
+      param_key:     paramKey,
+      grade_value:   param && param.type==='grade3' ? val : null,
+      numeric_value: param && param.type==='number' && val!=='' ? Number(val) : null,
+    };
+  });
+
+  const surveyRow = {
+    plot_no:        fieldCode,
+    stage_id:       stageId,
+    crop_age_days:  ageAtSurvey,
+    survey_date:    today,
+    status:         'surveyed',
+    remarks,
   };
-  const sf = getFieldByCode(surveyState.fieldCode);
-  const nextPending = getSurveyStages(sf).find(s=>s.status!=='surveyed');
-  alert(`✅ ${stage.label} Survey submitted for ${sf?.name}!${nextPending?'\n\nNext pending: '+nextPending.label+' Stage':'\n\nAll surveys complete!'}`);
-  screenHistory=[]; goTo('s-scout-alerts'); setPlannerTab('survey');
+
+  try {
+    if(!stageId) throw new Error('Survey stage reference data not loaded -- try reopening the app.');
+
+    const {data:authData} = await _sb.auth.getUser();
+    const {data:offRow}   = await _sb.from('farm_officers').select('id')
+      .eq('auth_user_id', authData.user.id).limit(1);
+    surveyRow.surveyed_by = offRow && offRow[0] ? offRow[0].id : null;
+
+    const {data:inserted, error:insertErr} = await _sb.from('surveys').insert(surveyRow).select('id');
+    if(insertErr) throw insertErr;
+    const surveyId = inserted[0].id;
+
+    // Upload photos
+    if(btn) btn.innerHTML = '<i class="ti ti-loader-2" style="font-size:18px"></i> Uploading photos...';
+    const photoUrls = await uploadSurveyPhotos(fieldCode, surveyId);
+    if(photoUrls.length){
+      await _sb.from('surveys').update({photo_urls: photoUrls}).eq('id', surveyId);
+    }
+
+    // Insert answered parameters (only ones we could resolve a parameter_id for)
+    const rowsToInsert = valuesPayload.filter(v=>v.parameter_id).map(v=>({...v, survey_id: surveyId}));
+    if(rowsToInsert.length){
+      const {error:valErr} = await _sb.from('survey_values').insert(rowsToInsert);
+      if(valErr) console.error('survey_values insert error:', valErr);
+    }
+
+    // Update local surveyDB cache for instant UI without a full reload
+    const dbKey = fieldCode+'_'+stageKey;
+    surveyDB[dbKey] = { ...(surveyDB[dbKey]||{}), surveyDate: today, values:{...surveyState.values}, remarks: remarks || '–', photoUrls };
+
+    const nextPending = getSurveyStages(sf).find(s=>s.status!=='surveyed');
+    if(btn){ btn.disabled = false; btn.innerHTML = '<i class="ti ti-check"></i> Submitted!'; }
+    setTimeout(()=>{
+      if(btn) btn.innerHTML = origHTML;
+      alert(`✅ ${stage.label} Survey submitted for ${sf?.name}!`
+        + (photoUrls.length ? '\n'+photoUrls.length+' photos uploaded' : '')
+        + (nextPending ? '\n\nNext pending: '+nextPending.label+' Stage' : '\n\nAll surveys complete!'));
+      screenHistory=[]; goTo('s-scout-alerts'); setPlannerTab('survey');
+    }, 800);
+
+  } catch(e) {
+    console.error('Survey save failed:', e);
+    // Queue for sync when back online (values go along with it so they
+    // aren't lost -- syncOfflineQueue() chains the surveys + survey_values
+    // inserts together once connectivity returns)
+    await queueOfflineAction('survey_report', { surveyRow, values: valuesPayload });
+
+    const dbKey = fieldCode+'_'+stageKey;
+    surveyDB[dbKey] = { ...(surveyDB[dbKey]||{}), surveyDate: today, values:{...surveyState.values}, remarks: remarks || '–' };
+
+    if(btn){ btn.disabled = false; btn.innerHTML = origHTML; }
+    showSyncToast('Saved offline -- will sync when online');
+    screenHistory=[]; goTo('s-scout-alerts'); setPlannerTab('survey');
+  }
 }
 
 
