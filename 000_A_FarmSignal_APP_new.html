@@ -208,6 +208,24 @@ body {
 </style>
 </head>
 <body>
+<!-- TEMPORARY DIAGNOSTIC -- remove once the zoom/map-init issue is found.
+     Shows any JS error directly on screen, since testing is happening on
+     a phone without easy access to browser dev tools. -->
+<div id="js-error-catcher" style="display:none;position:fixed;top:0;left:0;right:0;
+     background:#b91c1c;color:#fff;font-size:11px;font-family:monospace;
+     padding:8px;z-index:99999;max-height:40vh;overflow-y:auto;white-space:pre-wrap"></div>
+<script>
+  window.addEventListener('error', function(e){
+    const box = document.getElementById('js-error-catcher');
+    box.style.display = 'block';
+    box.textContent += 'ERROR: ' + e.message + '\n  at ' + e.filename + ':' + e.lineno + ':' + e.colno + '\n\n';
+  });
+  window.addEventListener('unhandledrejection', function(e){
+    const box = document.getElementById('js-error-catcher');
+    box.style.display = 'block';
+    box.textContent += 'UNHANDLED PROMISE REJECTION: ' + (e.reason && e.reason.message ? e.reason.message : e.reason) + '\n\n';
+  });
+</script>
 <div class="page-title">Farm Signal GeoTag — Interactive Prototype</div>
 <div class="phone" id="app">
   <div class="notch"></div>
