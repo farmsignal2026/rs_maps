@@ -3668,6 +3668,32 @@ function setMapStyle(style) {
 }
 
 function updateZoomLayers(zoom){
+  // TEMPORARY DIAGNOSTIC -- log every call with a timestamp, visible on
+  // screen, to see whether this function is even being invoked when the
+  // zoom control is used, and what zoom value it receives each time.
+  (function(){
+    const box = document.getElementById('js-error-catcher');
+    if(box){
+      box.style.display='block';
+      box.style.background='#1e3a8a';
+      box.textContent += '[' + new Date().toLocaleTimeString() + '] updateZoomLayers(' + zoom + ')  |  leafletMap.getZoom()=' + (typeof leafletMap !== 'undefined' && leafletMap ? leafletMap.getZoom() : 'no map') + '\n';
+    }
+  })();
+  // Independently polls the REAL zoom level every 2s, in the CORRECT
+  // scope where leafletMap is actually visible -- started once. If this
+  // polled value changes while updateZoomLayers() calls above don't
+  // appear, that proves 'zoomend' isn't firing at all (not just
+  // reporting wrong info).
+  if(!window._zoomPollStarted){
+    window._zoomPollStarted = true;
+    setInterval(function(){
+      if(typeof leafletMap === 'undefined' || !leafletMap) return;
+      const box = document.getElementById('js-error-catcher');
+      if(!box) return;
+      box.style.display='block';
+      box.textContent += '[poll ' + new Date().toLocaleTimeString() + '] real leafletMap.getZoom()=' + leafletMap.getZoom() + '\n';
+    }, 2000);
+  }
   document.getElementById('zoom-level-badge').textContent='Zoom: '+zoom;
   const hint=document.getElementById('zoom-hint');
   if(zoom>=ZOOM_THRESHOLD){
