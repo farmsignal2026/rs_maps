@@ -208,24 +208,6 @@ body {
 </style>
 </head>
 <body>
-<!-- TEMPORARY DIAGNOSTIC -- remove once the zoom/map-init issue is found.
-     Shows any JS error directly on screen, since testing is happening on
-     a phone without easy access to browser dev tools. -->
-<div id="js-error-catcher" style="display:none;position:fixed;top:0;left:0;right:0;
-     background:#b91c1c;color:#fff;font-size:11px;font-family:monospace;
-     padding:8px;z-index:99999;max-height:40vh;overflow-y:auto;white-space:pre-wrap"></div>
-<script>
-  window.addEventListener('error', function(e){
-    const box = document.getElementById('js-error-catcher');
-    box.style.display = 'block';
-    box.textContent += 'ERROR: ' + e.message + '\n  at ' + e.filename + ':' + e.lineno + ':' + e.colno + '\n\n';
-  });
-  window.addEventListener('unhandledrejection', function(e){
-    const box = document.getElementById('js-error-catcher');
-    box.style.display = 'block';
-    box.textContent += 'UNHANDLED PROMISE REJECTION: ' + (e.reason && e.reason.message ? e.reason.message : e.reason) + '\n\n';
-  });
-</script>
 <div class="page-title">Farm Signal GeoTag — Interactive Prototype</div>
 <div class="phone" id="app">
   <div class="notch"></div>
@@ -3668,32 +3650,6 @@ function setMapStyle(style) {
 }
 
 function updateZoomLayers(zoom){
-  // TEMPORARY DIAGNOSTIC -- log every call with a timestamp, visible on
-  // screen, to see whether this function is even being invoked when the
-  // zoom control is used, and what zoom value it receives each time.
-  (function(){
-    const box = document.getElementById('js-error-catcher');
-    if(box){
-      box.style.display='block';
-      box.style.background='#1e3a8a';
-      box.textContent += '[' + new Date().toLocaleTimeString() + '] updateZoomLayers(' + zoom + ')  |  leafletMap.getZoom()=' + (typeof leafletMap !== 'undefined' && leafletMap ? leafletMap.getZoom() : 'no map') + '\n';
-    }
-  })();
-  // Independently polls the REAL zoom level every 2s, in the CORRECT
-  // scope where leafletMap is actually visible -- started once. If this
-  // polled value changes while updateZoomLayers() calls above don't
-  // appear, that proves 'zoomend' isn't firing at all (not just
-  // reporting wrong info).
-  if(!window._zoomPollStarted){
-    window._zoomPollStarted = true;
-    setInterval(function(){
-      if(typeof leafletMap === 'undefined' || !leafletMap) return;
-      const box = document.getElementById('js-error-catcher');
-      if(!box) return;
-      box.style.display='block';
-      box.textContent += '[poll ' + new Date().toLocaleTimeString() + '] real leafletMap.getZoom()=' + leafletMap.getZoom() + '\n';
-    }, 2000);
-  }
   document.getElementById('zoom-level-badge').textContent='Zoom: '+zoom;
   const hint=document.getElementById('zoom-hint');
   if(zoom>=ZOOM_THRESHOLD){
@@ -4321,6 +4277,14 @@ function openMapView(onReady) {
     setMapStyle('satellite');
     buildMapLayers();
     fitMapToLoadedFields();
+    // Same fix the rebuild path already has -- the map container's size
+    // isn't always fully settled at the moment L.map() is constructed
+    // (e.g. mid-way through a screen transition), which can cause
+    // Leaflet controls (like the zoom +/- buttons) to render incorrectly
+    // or not at all on first load. invalidateSize() forces Leaflet to
+    // re-check the real container size and correctly redraw everything,
+    // including its controls.
+    leafletMap.invalidateSize();
     updateZoomLayers(13);
     leafletMap.on('zoomend', () => updateZoomLayers(leafletMap.getZoom()));
     leafletMap.on('click', (e) => {
