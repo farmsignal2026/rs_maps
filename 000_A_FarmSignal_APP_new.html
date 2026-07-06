@@ -5619,7 +5619,16 @@ async function loadFieldDataFromSupabase(){
           geoEntry.thresholdMin = sf.stage.tMin;
           geoEntry.thresholdMax = sf.stage.tMax;
           geoEntry.lastFetch    = latestConf.date.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
-          geoEntry.pngUrl       = latestConf.pngUrl || null;
+          // PNG raster should reflect the actual latest available image,
+          // NOT the confidence-walked latestConf used for NDVI/status --
+          // raster_png_url is only ever populated on a plot's TRUE latest
+          // observation, so tying pngUrl to latestConf would show no
+          // image at all whenever the true latest date got flagged as an
+          // unconfirmed spike (latestConf then points to an older date
+          // whose pngUrl is null by design), even though a real, current
+          // PNG exists in Supabase.
+          const latestWithPng = ndviInfo.history.slice().reverse().find(h => h.pngUrl);
+          geoEntry.pngUrl       = latestWithPng ? latestWithPng.pngUrl : null;
           if(ndviInfo.prev){
             geoEntry.prevNdvi = ndviInfo.prev.ndvi;
             geoEntry.prevDate = ndviInfo.prev.date.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
