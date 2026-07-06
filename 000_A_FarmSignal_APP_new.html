@@ -4013,6 +4013,7 @@ const NDVICanvasLayer = L.Layer.extend({
 
     fieldGeoData.forEach(item => {
       if(item.pngUrl) return; // real mosaic image handles this field instead
+      if(!item.polygon || !item.polygon.length) return; // no boundary data -- nothing to draw
       // Convert polygon lat/lng → canvas coords
       const pts = item.polygon.map(c => {
         const lp = map.latLngToLayerPoint(L.latLng(c[0], c[1]));
