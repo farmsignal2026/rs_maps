@@ -3601,10 +3601,16 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
 let leafletMap=null, currentMapStyle='satellite';
 let markerLayer=null, polygonLayer=null, ndviCanvasLayer=null, mosaicLayer=null;
+// Per-field lookups (keyed by field code) so a SPECIFIC field's display
+// can be overridden independent of the global zoom-based toggle -- used
+// for showing a field's real PNG based on live GPS proximity, regardless
+// of current zoom level.
+let fieldMarkerByCode={}, fieldOverlayByCode={};
+let nearGpsFieldCode=null;   // field code the user's live GPS is currently inside, or null
 let satTile=null, satLabelTile=null, roadTile=null;
 let mapSelectedIdx=null;
 let pendingScoutIdx=null;
-const ZOOM_THRESHOLD=16;
+const ZOOM_THRESHOLD=16;   // circles shown up to zoom 15; PNG shown from zoom 16 onward (zoom>=THRESHOLD triggers PNG)
 
 function buildTileLayers() {
   // Satellite: Esri World Imagery (free, no key)
@@ -4006,6 +4012,7 @@ function buildMapLayers(){
   markerLayer=L.layerGroup();
   polygonLayer=L.layerGroup();
   mosaicLayer=L.layerGroup();
+  fieldMarkerByCode={}; fieldOverlayByCode={}; nearGpsFieldCode=null;
 
   // Same ~30m buffer the raster pipeline (ndvi_rastertagMosaic_v2Final.py)
   // applies when georeferencing each PNG -- the saved image covers
@@ -4031,11 +4038,12 @@ function buildMapLayers(){
        <span style="font-size:10px;font-weight:700;color:${h.color}">● ${h.label} &nbsp;NDVI ${ndviStr}</span>`,
       {direction:'top',offset:[0,-10],className:'field-tooltip'}
     );
-    marker.on('click', () => { zoomToField(item); });
+    marker.on('click', () => { zoomToField(item, false); });   // zoom only -- tap the revealed PNG/map to open details
     markerLayer.addLayer(marker);
 
-    // Real PNG mosaic overlay, when this field has one loaded from the
-    // GitHub zip -- the actual NDVI imagery, not a guess.
+    // Real PNG raster overlay, when this field has one -- sourced live
+    // from Supabase (ndvi_observations.raster_png_url), the actual NDVI
+    // imagery, not a guess.
     if(item.pngUrl){
       const polyBounds=L.latLngBounds(item.polygon);
       const sw=polyBounds.getSouthWest(), ne=polyBounds.getNorthEast();
@@ -4043,8 +4051,15 @@ function buildMapLayers(){
         [sw.lat-RASTER_BUF_DEG, sw.lng-RASTER_BUF_DEG],
         [ne.lat+RASTER_BUF_DEG, ne.lng+RASTER_BUF_DEG]
       );
-      mosaicLayer.addLayer(L.imageOverlay(item.pngUrl, imageBounds, {opacity:0.9, interactive:false}));
+      // interactive:true + click handler so tapping the field's real PNG
+      // (e.g. when shown via live GPS proximity, regardless of zoom)
+      // opens the same detail panel as tapping its circle marker does.
+      const overlay = L.imageOverlay(item.pngUrl, imageBounds, {opacity:0.9, interactive:true});
+      overlay.on('click', () => showFieldDetailPanel(item));
+      mosaicLayer.addLayer(overlay);
+      fieldOverlayByCode[item.code] = overlay;
     }
+    fieldMarkerByCode[item.code] = marker;
 
     // Polygon — visible fill at high zoom (health color), outline always.
     // Color fill only used as a fallback for fields with no real PNG.
@@ -4078,6 +4093,64 @@ function buildMapLayers(){
 // of staying fixed on the mock Trichy-region coordinates. Only runs for
 // real GitHub-loaded data -- mock data keeps its original fixed view,
 // since that's still useful for demos and was tuned to look good there.
+// Standard ray-casting point-in-polygon check. polygon is an array of
+// [lat,lng] pairs (same format fieldGeoData already uses). Used to
+// determine which field (if any) the user's live GPS position is
+// currently inside, for showing that field's real PNG regardless of
+// zoom level while physically at the field.
+function isPointInPolygon(lat, lng, polygon){
+  let inside = false;
+  for(let i=0, j=polygon.length-1; i<polygon.length; j=i++){
+    const yi=polygon[i][0], xi=polygon[i][1];
+    const yj=polygon[j][0], xj=polygon[j][1];
+    const intersect = ((yi>lat) !== (yj>lat)) &&
+      (lng < (xj-xi) * (lat-yi) / (yj-yi) + xi);
+    if(intersect) inside = !inside;
+  }
+  return inside;
+}
+
+// Checks all loaded fields for one containing the given GPS point.
+// Returns the field code, or null if the point isn't inside any field.
+function findFieldContainingPoint(lat, lng){
+  for(const item of fieldGeoData){
+    if(!item.polygon || !item.polygon.length) continue;
+    if(isPointInPolygon(lat, lng, item.polygon)) return item.code;
+  }
+  return null;
+}
+
+// Applies the "show real PNG regardless of zoom" override for the field
+// the user's GPS is currently inside, and reverts the PREVIOUS field (if
+// different) back to normal zoom-based behavior. Independent of
+// updateZoomLayers()'s global toggle -- this only touches the one
+// specific field's own marker/overlay.
+function applyGpsFieldOverride(newFieldCode){
+  if(newFieldCode === nearGpsFieldCode) return;   // no change
+
+  // Revert the previously-overridden field back to whatever the current
+  // zoom level says it should look like.
+  if(nearGpsFieldCode){
+    const prevMarker = fieldMarkerByCode[nearGpsFieldCode];
+    const prevOverlay = fieldOverlayByCode[nearGpsFieldCode];
+    const zoomShowsPng = leafletMap.getZoom() >= ZOOM_THRESHOLD;
+    if(prevMarker) prevMarker.setStyle(zoomShowsPng ? {opacity:0,fillOpacity:0} : {opacity:1,fillOpacity:0.9});
+    if(prevOverlay && prevOverlay.setOpacity) prevOverlay.setOpacity(zoomShowsPng ? 0.9 : 0);
+  }
+
+  nearGpsFieldCode = newFieldCode;
+
+  // Force the new field to show its PNG (hide circle) regardless of zoom.
+  if(newFieldCode){
+    const marker = fieldMarkerByCode[newFieldCode];
+    const overlay = fieldOverlayByCode[newFieldCode];
+    if(marker) marker.setStyle({opacity:0, fillOpacity:0});
+    if(overlay && overlay.setOpacity) overlay.setOpacity(0.9);
+    // Field has no PNG yet (raster_png_url null) -- nothing to force on,
+    // circle stays visible as the only available indicator.
+  }
+}
+
 // Live GPS position -- real navigator.geolocation, not simulated. Toggle
 // on/off via the button on the map screen. Shows a blue dot + accuracy
 // circle that updates as you move, useful for actually walking to a field
@@ -4110,6 +4183,11 @@ function toggleMyLocation(){
         myLocationMarker.setLatLng(latlng);
         myLocationAccuracyCircle.setLatLng(latlng).setRadius(pos.coords.accuracy);
       }
+      // Show the real PNG for whichever field the user is currently
+      // standing inside, regardless of current zoom level -- lets a
+      // field officer see within-field good/poor variation while
+      // physically at the field.
+      applyGpsFieldOverride(findFieldContainingPoint(latlng[0], latlng[1]));
     },
     err=>{
       stopMyLocation();
@@ -4126,6 +4204,7 @@ function stopMyLocation(){
   if(myLocationWatchId!==null){ navigator.geolocation.clearWatch(myLocationWatchId); myLocationWatchId=null; }
   if(myLocationMarker){ leafletMap.removeLayer(myLocationMarker); myLocationMarker=null; }
   if(myLocationAccuracyCircle){ leafletMap.removeLayer(myLocationAccuracyCircle); myLocationAccuracyCircle=null; }
+  applyGpsFieldOverride(null);   // revert whichever field was being force-shown
   const btn=document.getElementById('my-location-btn');
   if(btn){ btn.style.background='#fff'; btn.querySelector('i').style.color='#27500A'; }
 }
