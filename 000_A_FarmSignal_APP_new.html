@@ -8080,7 +8080,7 @@ function computeDivisionSummary(filterMill, filterDiv){
     const geo = fieldGeoData[i];
     if(geo && geo.healthStatus){
       if(geo.healthStatus==='good')           d.health.good++;
-      else if(geo.healthStatus==='moderate')  d.health.optimal++;
+      else if(geo.healthStatus==='optimal')   d.health.optimal++;
       else if(geo.healthStatus==='serious')   { d.health.attention++; d.alertCount++; }
       else if(geo.healthStatus==='attention') d.health.attention++;
       // 'unknown' (no valid growth stage -- e.g. missing planting date) and
