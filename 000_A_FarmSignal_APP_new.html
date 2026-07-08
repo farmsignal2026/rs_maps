@@ -364,6 +364,25 @@ body {
       </div>
     </div>
     <div class="body">
+      <!-- Filters: Client/Factory, Division, Crop Type -->
+      <div style="display:flex;gap:6px;margin-bottom:10px">
+        <select id="filter-factory" onchange="onFactoryFilterChange()"
+          style="flex:1;padding:9px 8px;border-radius:9px;border:1px solid #D3D1C7;
+          font-size:12px;color:#2C2C2A;background:#fff;outline:none;font-family:inherit;cursor:pointer">
+          <option value="">All Clients</option>
+        </select>
+        <select id="filter-division" onchange="renderFields()"
+          style="flex:1;padding:9px 8px;border-radius:9px;border:1px solid #D3D1C7;
+          font-size:12px;color:#2C2C2A;background:#fff;outline:none;font-family:inherit;cursor:pointer">
+          <option value="">All Divisions</option>
+        </select>
+        <select id="filter-croptype" onchange="renderFields()"
+          style="flex:1;padding:9px 8px;border-radius:9px;border:1px solid #D3D1C7;
+          font-size:12px;color:#2C2C2A;background:#fff;outline:none;font-family:inherit;cursor:pointer">
+          <option value="">All Crop Types</option>
+        </select>
+      </div>
+
       <!-- Stat Cards — tap to filter list below -->
       <div class="stat-row">
         <div class="stat-card" id="card-all" onclick="showTab('all')">
@@ -413,25 +432,6 @@ body {
           <span id="progress-scope-line">4 Sections · 12 Villages</span>
           <span>Target: 100% by 30 Jun</span>
         </div>
-      </div>
-
-      <!-- Filters: Client/Factory, Division, Crop Type -->
-      <div style="display:flex;gap:6px;margin-bottom:10px">
-        <select id="filter-factory" onchange="onFactoryFilterChange()"
-          style="flex:1;padding:9px 8px;border-radius:9px;border:1px solid #D3D1C7;
-          font-size:12px;color:#2C2C2A;background:#fff;outline:none;font-family:inherit;cursor:pointer">
-          <option value="">All Clients</option>
-        </select>
-        <select id="filter-division" onchange="renderFields()"
-          style="flex:1;padding:9px 8px;border-radius:9px;border:1px solid #D3D1C7;
-          font-size:12px;color:#2C2C2A;background:#fff;outline:none;font-family:inherit;cursor:pointer">
-          <option value="">All Divisions</option>
-        </select>
-        <select id="filter-croptype" onchange="renderFields()"
-          style="flex:1;padding:9px 8px;border-radius:9px;border:1px solid #D3D1C7;
-          font-size:12px;color:#2C2C2A;background:#fff;outline:none;font-family:inherit;cursor:pointer">
-          <option value="">All Crop Types</option>
-        </select>
       </div>
 
       <!-- Search -->
@@ -871,6 +871,11 @@ body {
           <div style="font-size:11px;color:#639922;margin-top:2px" id="dp-code">–</div>
         </div>
         <div style="display:flex;align-items:center;gap:6px">
+          <button id="dp-navigate-btn" onclick="navigateToField()"
+            style="display:none;align-items:center;gap:4px;background:#f0f6ff;border:1px solid #185FA5;
+            color:#185FA5;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer">
+            <i class="ti ti-navigation" style="font-size:13px"></i> Navigate
+          </button>
           <span id="dp-health-badge" style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:6px;">–</span>
           <button onclick="closeDetailPanel()" style="background:none;border:none;cursor:pointer;color:#888780;font-size:16px;padding:0"><i class="ti ti-x"></i></button>
         </div>
@@ -2652,8 +2657,9 @@ function renderWatchBanner() {
 }
 
 function renderHealthSummary(){
-  // Counts from mapped fields with healthStatus — same source the filter uses
-  const mapped = fields.filter(f=>f.mapped);
+  // Counts from mapped fields with healthStatus, scoped by the current
+  // Mill/Division/Crop-Type filter (same source the field list filter uses)
+  const mapped = getFilterScopedFields().filter(f=>f.mapped);
   const indexed = mapped.filter(f=>f.healthStatus);
   const counts = { good:0, optimal:0, attention:0, serious:0 };
   indexed.forEach(f => { if(counts[f.healthStatus]!==undefined) counts[f.healthStatus]++; });
@@ -2786,12 +2792,61 @@ function populateFieldFilters() {
   fill(cropSel, cropTypes, 'All Crop Types');
 }
 
+// Fields scoped only by the Mill/Division/Crop-Type filter dropdowns --
+// deliberately ignores activeTab/activeHealth/search, since those affect
+// which fields show in the list below, not the KPI cards or health
+// summary above it (which should always reflect the current filter
+// selection, not the current list view).
+function getFilterScopedFields(){
+  if(!fieldDataLoaded) return fields; // legacy/mock mode predates these filters
+  const fFactory  = (document.getElementById('filter-factory')||{value:''}).value;
+  const fDivision = (document.getElementById('filter-division')||{value:''}).value;
+  const fCropType = (document.getElementById('filter-croptype')||{value:''}).value;
+  let list = fields;
+  if(fFactory)  list = list.filter(f=>f.factory===fFactory);
+  if(fDivision) list = list.filter(f=>f.division===fDivision);
+  if(fCropType) list = list.filter(f=>f.type===fCropType);
+  return list;
+}
+
 // Factory changed -- division options must cascade, so repopulate filters
 // (which recomputes the division list against the new factory) before
 // re-rendering the field list.
 function onFactoryFilterChange() {
   populateFieldFilters();
   renderFields();
+}
+
+// Called when a Division card is tapped on the Home dashboard. Jumps to
+// the Fields page with that division's mill + division pre-selected in
+// the filter dropdowns, so the list is already scoped to it -- no need
+// to re-select the filters by hand.
+function goToFieldsFiltered(divNameEnc, factoryEnc){
+  const divName     = decodeURIComponent(divNameEnc);
+  const factoryName = decodeURIComponent(factoryEnc);
+
+  goTo('s-dashboard');
+
+  // Populate filter options first (needed if this is the first time the
+  // Fields page filters have been touched), select the mill, then
+  // repopulate again so the Division dropdown's options cascade off that
+  // mill before we select the division itself.
+  populateFieldFilters();
+  const factorySel = document.getElementById('filter-factory');
+  if(factorySel && factoryName) factorySel.value = factoryName;
+  populateFieldFilters();
+  const divisionSel = document.getElementById('filter-division');
+  if(divisionSel && divName) divisionSel.value = divName;
+
+  // Clear anything else that could hide the division's fields
+  const cropSel = document.getElementById('filter-croptype');
+  if(cropSel) cropSel.value = '';
+  const searchInput = document.getElementById('search-input');
+  if(searchInput) searchInput.value = '';
+  const searchClear = document.getElementById('search-clear');
+  if(searchClear) searchClear.style.display = 'none';
+
+  showTab('all'); // resets tab highlight + health filter, then calls renderFields()
 }
 
 function clearSearch() {
@@ -2801,6 +2856,12 @@ function clearSearch() {
 }
 
 function renderFields() {
+  // KPI cards + health summary reflect the Mill/Division/Crop-Type filter
+  // dropdowns, so refresh them here too -- renderFields() runs on every
+  // filter/search/tab change, keeping everything on the page in sync.
+  refreshDashboardStats();
+  renderHealthSummary();
+
   const query = (document.getElementById('search-input')||{value:''}).value.trim();
   const clearBtn = document.getElementById('search-clear');
   if(clearBtn) clearBtn.style.display = query ? 'block' : 'none';
@@ -3244,6 +3305,37 @@ function haversineM(lat1,lng1,lat2,lng2){
   const R=6371000, dLat=(lat2-lat1)*Math.PI/180, dLng=(lng2-lng1)*Math.PI/180;
   const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
   return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+// Finds the closest point of a field's boundary (a captured GeoTag vertex)
+// to a given lat/lng, e.g. an officer's current GPS fix. Used by both
+// Navigate (route to the nearest edge/corner instead of the centroid,
+// which can sit unreachably in the middle of the plot) and scout
+// geofencing (distance-to-boundary is a much better proxy than
+// distance-to-centroid for long/irregular fields).
+function nearestVertexDist(lat, lng, polygon){
+  if(!polygon || !polygon.length) return null;
+  let best=null, bestDist=Infinity;
+  for(const pt of polygon){
+    const d = haversineM(lat, lng, pt[0], pt[1]);
+    if(d < bestDist){ bestDist = d; best = pt; }
+  }
+  return best ? {lat: best[0], lng: best[1], dist: bestDist} : null;
+}
+
+// Ray-casting point-in-polygon test (lat/lng ring). Used so an officer
+// standing well inside a large field -- and therefore possibly >25m from
+// every boundary vertex -- still passes the geofence.
+function pointInPolygonLL(lat, lng, polygon){
+  let inside = false;
+  const n = polygon.length;
+  for(let i=0, j=n-1; i<n; j=i++){
+    const yi=polygon[i][0], xi=polygon[i][1];
+    const yj=polygon[j][0], xj=polygon[j][1];
+    const intersect = ((yi>lat)!==(yj>lat)) && (lng < (xj-xi)*(lat-yi)/(yj-yi)+xi);
+    if(intersect) inside = !inside;
+  }
+  return inside;
 }
 
 // Check if segments (p1->p2) and (p3->p4) intersect
@@ -3846,14 +3938,78 @@ function showFieldDetailPanel(geoItem){
   dpSurvey.innerHTML = '<i class="ti ti-clipboard-check" style="font-size:16px"></i> Survey';
   dpSurvey.onclick = () => geoFencedScout(geoItem, 'survey');
 
+  // Navigate button -- shown whenever we have a centroid or a boundary to
+  // route to. The actual destination point is computed at tap time (see
+  // navigateToField), not here, since it depends on the officer's current
+  // GPS position at that moment.
+  currentDetailPanelGeo = geoItem;
+  const dpNav = document.getElementById('dp-navigate-btn');
+  if(dpNav){
+    dpNav.style.display = (geoItem.centroid && geoItem.centroid[0]) || (geoItem.polygon && geoItem.polygon.length)
+      ? 'inline-flex' : 'none';
+  }
+
   document.getElementById('field-detail-panel').style.transform='translateY(0)';
+}
+
+// Tracks which field is currently shown in the detail panel, so
+// navigateToField() can look up its polygon/centroid at tap time.
+let currentDetailPanelGeo = null;
+
+// Opens Google Maps turn-by-turn directions to the field currently open in
+// the detail panel. Routes to the boundary point nearest the officer's
+// current GPS position (not the centroid) so they're guided to the closest
+// edge/corner rather than a point that can sit unreachably in the middle of
+// the plot. Falls back to the centroid, then the first boundary vertex, if
+// a live GPS fix isn't available.
+function navigateToField(){
+  const geoItem = currentDetailPanelGeo;
+  if(!geoItem){ alert('No field selected.'); return; }
+  const poly = geoItem.polygon;
+  const centroid = geoItem.centroid;
+
+  function openDirections(lat, lng){
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
+    window.open(url, '_blank');
+  }
+
+  if(!poly || poly.length < 3){
+    if(centroid && centroid[0]) openDirections(centroid[0], centroid[1]);
+    else alert('No GPS location available for this field yet.');
+    return;
+  }
+
+  if(!navigator.geolocation){
+    if(centroid && centroid[0]) openDirections(centroid[0], centroid[1]);
+    else openDirections(poly[0][0], poly[0][1]);
+    return;
+  }
+
+  const btn = document.getElementById('dp-navigate-btn');
+  const origHTML = btn ? btn.innerHTML : '';
+  if(btn){ btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2" style="font-size:13px"></i> Locating...'; }
+
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      if(btn){ btn.disabled = false; btn.innerHTML = origHTML; }
+      const nv = nearestVertexDist(pos.coords.latitude, pos.coords.longitude, poly);
+      if(nv) openDirections(nv.lat, nv.lng);
+      else if(centroid && centroid[0]) openDirections(centroid[0], centroid[1]);
+    },
+    () => {
+      if(btn){ btn.disabled = false; btn.innerHTML = origHTML; }
+      if(centroid && centroid[0]) openDirections(centroid[0], centroid[1]);
+      else openDirections(poly[0][0], poly[0][1]);
+    },
+    {timeout:8000, enableHighAccuracy:true, maximumAge:30000}
+  );
 }
 
 function geoFencedScout(geoItem, type, stageKey, btnIdOverride){
   const f = getFieldByCode(geoItem.code);
   if(!f){ alert('Field not found.'); return; }
 
-  // Geofence check -- must be within 25m of field centroid
+  // Geofence check -- must be within 25m of the field boundary (or inside it)
   const FENCE_M = 25;
 
   if(!navigator.geolocation){
@@ -3885,8 +4041,25 @@ function geoFencedScout(geoItem, type, stageKey, btnIdOverride){
         return;
       }
 
-      const dist = haversineM(lat, lng, geoItem.centroid[0], geoItem.centroid[1]);
-      console.log('GPS dist to field:', dist.toFixed(1)+'m, accuracy:', acc.toFixed(1)+'m');
+      // Geofence distance: prefer distance-to-boundary over
+      // distance-to-centroid, since centroid can be far from every edge on
+      // long/irregular plots. Standing inside the polygon always passes
+      // (covers officers in the middle of large fields, potentially >25m
+      // from every vertex). Falls back to centroid distance if no polygon
+      // was captured for this plot.
+      const poly = geoItem.polygon;
+      let dist;
+      if(poly && poly.length >= 3){
+        if(pointInPolygonLL(lat, lng, poly)){
+          dist = 0;
+        } else {
+          const nv = nearestVertexDist(lat, lng, poly);
+          dist = nv ? nv.dist : haversineM(lat, lng, geoItem.centroid[0], geoItem.centroid[1]);
+        }
+      } else {
+        dist = haversineM(lat, lng, geoItem.centroid[0], geoItem.centroid[1]);
+      }
+      console.log('GPS dist to field boundary:', dist.toFixed(1)+'m, accuracy:', acc.toFixed(1)+'m');
 
       if(dist > FENCE_M + acc){ // account for GPS accuracy
         alert('You are ' + Math.round(dist) + 'm from this field.\n\nPlease move within 25m of the field to submit a '+(type==='survey'?'survey':'scout')+' report.\n\nThis ensures data is collected from the actual field.');
@@ -5716,21 +5889,34 @@ async function loadFieldDataFromSupabase(){
               latestConf = obs;
             }
           }
-          if(!latestConf) latestConf = ndviInfo.latest;
 
-          let status = statusForNdvi(latestConf.ndvi, sf.stage);
-          if(status==='attention'){
-            const streak = computeAttentionStreak(ndviInfo.history, plantDate);
-            if(streak >= SERIOUS_STREAK_THRESHOLD) status = 'serious';
-          }
-
-          geoEntry.ndvi         = latestConf.ndvi;
-          geoEntry.healthStatus = status;
           geoEntry.growthStage  = sf.stage.name;
           geoEntry.growthDays   = age;
           geoEntry.thresholdMin = sf.stage.tMin;
           geoEntry.thresholdMax = sf.stage.tMax;
-          geoEntry.lastFetch    = latestConf.date.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+
+          if(!latestConf){
+            // Every observation for this plot is low-confidence or
+            // S1-estimated -- there is no reading we're willing to
+            // classify on. Leave health status 'unknown' rather than
+            // silently falling back to an S1 estimate, which would defeat
+            // the whole point of excluding S1 above.
+            geoEntry.ndvi         = null;
+            geoEntry.healthStatus = 'unknown';
+            geoEntry.lastFetch    = ndviInfo.latest.date.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})+' (S1 only)';
+          } else {
+            let status = statusForNdvi(latestConf.ndvi, sf.stage);
+            if(status==='attention'){
+              const streak = computeAttentionStreak(ndviInfo.history, plantDate);
+              if(streak >= SERIOUS_STREAK_THRESHOLD) status = 'serious';
+            }
+
+            geoEntry.ndvi         = latestConf.ndvi;
+            geoEntry.healthStatus = status;
+            geoEntry.lastFetch    = latestConf.date.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+            field.healthStatus    = status;
+          }
+
           // PNG raster should reflect the actual latest available image,
           // NOT the confidence-walked latestConf used for NDVI/status --
           // raster_png_url is only ever populated on a plot's TRUE latest
@@ -5754,14 +5940,19 @@ async function loadFieldDataFromSupabase(){
               attention: latestPx.pct_attention||0,
             };
           }
-          // Stage history
+          // Stage history -- also excludes S1 rows from the per-stage
+          // average, same as the headline status above. Previously only
+          // 'low' confidence was excluded here, so an S1-estimated
+          // reading could still shift a stage's average NDVI (and its
+          // Good/Moderate/Attention color) in this timeline even though
+          // it was correctly excluded from the current-status badge.
           geoEntry.stageData = STAGES.map((s,i)=>{
             const dMin = i===0 ? 0 : STAGES[i-1].cumEnd;
             const dMax = s.cumEnd;
             if(dMin > age) return {ndvi:null, status:'future'};
             let sum=0, n=0;
             ndviInfo.history.forEach(h=>{
-              if(h.confidence==='low') return;
+              if(h.confidence==='low' || h.isS1) return;
               const a = Math.round((h.date - plantDate) / 86400000);
               if(a>=dMin && a<=dMax){ sum+=h.ndvi; n++; }
             });
@@ -5769,8 +5960,6 @@ async function loadFieldDataFromSupabase(){
             const avg = sum/n;
             return {ndvi:avg, status:statusForNdvi(avg, s), current:(i===sf.idx)};
           });
-
-          field.healthStatus  = status;
         }
       }
 
@@ -6116,20 +6305,31 @@ async function loadFieldDataFromGitHub(){
               }
             } else { lastConfNdvi=obs.ndvi; latestConf=obs; }
           }
-          if(!latestConf) latestConf=ndviInfo.latest;
 
-          let status=statusForNdvi(latestConf.ndvi, sf.stage);
-          if(status==='attention'){
-            const streak=computeAttentionStreak(ndviInfo.history, plantDate);
-            if(streak>=SERIOUS_STREAK_THRESHOLD) status='serious';
-          }
-          geoEntry.ndvi=latestConf.ndvi;
-          geoEntry.healthStatus=status;
           geoEntry.growthStage=sf.stage.name;
           geoEntry.growthDays=age;
           geoEntry.thresholdMin=sf.stage.tMin;
           geoEntry.thresholdMax=sf.stage.tMax;
-          geoEntry.lastFetch=ndviInfo.latest.date.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+
+          let status;
+          if(!latestConf){
+            // No confident (non-S1, non-low-confidence) reading exists
+            // anywhere in this plot's history -- don't classify off an S1
+            // estimate, leave it 'unknown' instead.
+            status = 'unknown';
+            geoEntry.ndvi=null;
+            geoEntry.healthStatus='unknown';
+            geoEntry.lastFetch=ndviInfo.latest.date.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})+' (S1 only)';
+          } else {
+            status=statusForNdvi(latestConf.ndvi, sf.stage);
+            if(status==='attention'){
+              const streak=computeAttentionStreak(ndviInfo.history, plantDate);
+              if(streak>=SERIOUS_STREAK_THRESHOLD) status='serious';
+            }
+            geoEntry.ndvi=latestConf.ndvi;
+            geoEntry.healthStatus=status;
+            geoEntry.lastFetch=latestConf.date.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+          }
           if(ndviInfo.prev){
             geoEntry.prevNdvi=ndviInfo.prev.ndvi;
             geoEntry.prevDate=ndviInfo.prev.date.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
@@ -6142,10 +6342,11 @@ async function loadFieldDataFromGitHub(){
             // while in this stage -- not just the last one. This is what
             // matches a manual average computed from the NDVI trends
             // file, and is consistent with how the desktop dashboard's
-            // Stage Matrix scores each stage.
+            // Stage Matrix scores each stage. Excludes S1 rows too, same
+            // as the headline status above.
             let sum=0, n=0;
             ndviInfo.history.forEach(h=>{
-              if(h.confidence==='low') return;
+              if(h.confidence==='low' || h.isS1) return;
               const a=Math.round((h.date-plantDate)/86400000);
               if(a>=dMin && a<=dMax){ sum+=h.ndvi; n++; }
             });
@@ -6395,10 +6596,11 @@ function applyRoleUI() {
 }
 
 function refreshDashboardStats() {
-  const total  = getTotalPlots();
-  const mapped = fields.filter(f=>f.mapped).length;
+  const scoped = getFilterScopedFields();
+  const total  = fieldDataLoaded ? scoped.length : getTotalPlots();
+  const mapped = scoped.filter(f=>f.mapped).length;
   const unmapped = total - mapped;
-  const pct = Math.round(mapped/total*100);
+  const pct = total ? Math.round(mapped/total*100) : 0;
   // Stat cards
   const elM = document.getElementById('stat-mapped');
   const elU = document.getElementById('stat-unmapped');
@@ -8239,7 +8441,7 @@ function _renderFactoryDash() {
     const trendIcon = d.ndviTrendDir==='up'?'ti-trending-up':'ti-trending-down';
     return `
     <div style="background:#fff;border-radius:12px;border:1px solid #e8e4da;padding:12px;margin-bottom:8px;cursor:pointer"
-      onclick="goTo('s-dashboard')">
+      onclick="goToFieldsFiltered('${encodeURIComponent(d.name)}','${encodeURIComponent(d.factory||'')}')">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
         <div>
           <div style="font-size:13px;font-weight:700;color:#1a3a6b">${d.name}</div>
