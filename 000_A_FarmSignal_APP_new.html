@@ -5893,13 +5893,53 @@ function renderFollowupNdviComparison(geoItem){
 // an officer can pull up exactly what was found on a previous visit --
 // checklist detail, remarks, and photos -- while standing in the field
 // on their phone, without having to remember or re-derive it.
-function openScoutDetail(code){
+// Builds one normalized scout record for a plot, preferring the local
+// scoutDB cache (this browser session's own submissions -- fastest,
+// works offline) and falling back to the Supabase-loaded scoutByPlot
+// data (any field scouted from any device/session, loaded at app
+// start). Previously openScoutDetail only ever read scoutDB, so any
+// field scouted before the current session opened showed nothing --
+// scoutDB is just an in-memory JS object, it doesn't survive a reload.
+function normalizeScoutRecord(code){
+  const local = scoutDB[code];
+  if(local && local.checklist) return { source:'local', ...local };
+
+  const rows = scoutByPlot[code];
+  const latest = rows && rows.length ? rows[0] : null;
+  if(!latest) return local ? { source:'local', ...local } : null;
+
+  return {
+    source: 'supabase',
+    reportId: latest.id,
+    scoutDate: latest.visit_date,
+    checklist: latest.checklist || null,
+    photoUrls: latest.photo_urls || [],
+    cat: (latest.stress_type||[]).join(', '),
+    intensity: latest.stress_severity,
+    remarks: (latest.notes||'').split(' | ').slice(1).join(' | ') || null, // strip the checklist summary prefix submitScout() writes
+    recoGiven: (latest.notes||'').includes('Recommendation given') ? 'yes' : null,
+    followupDue: latest.follow_up_date,
+    // followupDone is determined separately (live scout_followups fetch)
+    followupDone: local ? local.followupDone : false,
+    closeStatus: local ? local.closeStatus : null,
+    followupAdopt: local ? local.followupAdopt : null,
+    followupHelp: local ? local.followupHelp : null,
+    followupRemarks: local ? local.followupRemarks : null,
+    followupPhotoUrls: local ? local.followupPhotoUrls : null,
+  };
+}
+
+async function openScoutDetail(code){
   const f = getFieldByCode(code);
   if(!f) return;
-  const s = scoutDB[code] || {};
-  const st = getScoutStatus(code);
+  goTo('s-scout-detail');
 
   document.getElementById('sd-header-sub').textContent = f.name+' · '+f.code+' · '+f.village;
+  document.getElementById('sd-checklist').innerHTML = '<div style="font-size:11px;color:#888780;padding:10px 0;text-align:center">Loading…</div>';
+  document.getElementById('sd-scout-photos').innerHTML = '';
+
+  const st = getScoutStatus(code);
+  const s = normalizeScoutRecord(code) || {};
 
   // Status badge
   const cfg = STATUS_CFG[st.type] || STATUS_CFG.unattended;
@@ -5947,35 +5987,63 @@ function openScoutDetail(code){
         ${entry.status ? `<span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:5px;background:${statusCol.bg};color:${statusCol.col};border:1px solid ${statusCol.border};flex-shrink:0">${entry.status}</span>` : '<span style="font-size:9px;color:#D3D1C7">–</span>'}
       </div>`;
     }).join('');
-  } else {
-    // Older/offline-queued record with no cached checklist -- fall back
-    // to the flattened summary that's always available.
+  } else if(s.cat || s.intensity) {
+    // No checklist available (e.g. a very old report from before the
+    // checklist column existed) -- fall back to the flattened summary.
     checklistEl.innerHTML = `<div style="font-size:11px;color:#5F5E5A;padding:6px 0">
       <div><span style="font-weight:600">Categories flagged: </span>${s.cat || '–'}</div>
       <div style="margin-top:3px"><span style="font-weight:600">Worst severity: </span>${s.intensity || '–'}</div>
     </div>`;
+  } else {
+    checklistEl.innerHTML = `<div style="font-size:11px;color:#888780;padding:6px 0">No scout record found for this field yet.</div>`;
   }
 
   // Scout photos -- real links, tap to open full-size
-  const scoutPhotosEl = document.getElementById('sd-scout-photos');
-  scoutPhotosEl.innerHTML = renderDetailPhotoGrid(s.photoUrls);
+  document.getElementById('sd-scout-photos').innerHTML = renderDetailPhotoGrid(s.photoUrls);
 
-  // Follow-up card
+  // Follow-up card. Local scoutDB (this session's own follow-up
+  // submission) is checked first as the fast path; otherwise fetch
+  // scout_followups live -- wrapped in try/catch since that table is a
+  // newer addition and may not exist yet on every deployment.
   const fuCard = document.getElementById('sd-followup-card');
   const noFu = document.getElementById('sd-no-followup');
   const fuBtn = document.getElementById('sd-followup-btn');
 
+  let fu = null;
   if(s.followupDone){
+    fu = s; // local cache already has everything, normalized field names
+  } else {
+    try {
+      const {data} = await _sb.from('scout_followups')
+        .select('*').eq('plot_no', code)
+        .order('followup_date', {ascending:false}).limit(1);
+      if(data && data.length){
+        const r = data[0];
+        fu = {
+          followupDue: r.followup_date,
+          followupAdopt: r.adopted,
+          closeStatus: r.crop_status,
+          followupHelp: r.help_needed,
+          followupRemarks: r.remarks,
+          followupPhotoUrls: r.photo_urls || [],
+        };
+      }
+    } catch(e){
+      console.log('scout_followups not available yet:', e.message);
+    }
+  }
+
+  if(fu){
     fuCard.style.display = 'block';
     noFu.style.display = 'none';
-    document.getElementById('sd-fu-date').textContent = s.followupDue ? fmtDate(s.followupDue) : '–';
-    document.getElementById('sd-fu-adopt').textContent = s.followupAdopt==='yes' ? 'Yes ✓' : s.followupAdopt==='no' ? 'No' : '–';
-    document.getElementById('sd-fu-crop').textContent = (s.closeStatus||'–').replace('-',' ');
-    document.getElementById('sd-fu-help').textContent = s.followupHelp==='yes' ? 'Yes — help requested' : s.followupHelp==='no' ? 'No' : '–';
+    document.getElementById('sd-fu-date').textContent = fu.followupDue ? fmtDate(fu.followupDue) : '–';
+    document.getElementById('sd-fu-adopt').textContent = fu.followupAdopt==='yes' ? 'Yes ✓' : fu.followupAdopt==='no' ? 'No' : '–';
+    document.getElementById('sd-fu-crop').textContent = (fu.closeStatus||'–').replace('-',' ');
+    document.getElementById('sd-fu-help').textContent = fu.followupHelp==='yes' ? 'Yes — help requested' : fu.followupHelp==='no' ? 'No' : '–';
     const fuRemarksWrap = document.getElementById('sd-fu-remarks-wrap');
-    if(s.followupRemarks){ fuRemarksWrap.style.display='block'; document.getElementById('sd-fu-remarks').textContent = s.followupRemarks; }
+    if(fu.followupRemarks){ fuRemarksWrap.style.display='block'; document.getElementById('sd-fu-remarks').textContent = fu.followupRemarks; }
     else fuRemarksWrap.style.display = 'none';
-    document.getElementById('sd-fu-photos').innerHTML = renderDetailPhotoGrid(s.followupPhotoUrls);
+    document.getElementById('sd-fu-photos').innerHTML = renderDetailPhotoGrid(fu.followupPhotoUrls);
     fuBtn.style.display = 'none';
   } else {
     fuCard.style.display = 'none';
@@ -5988,8 +6056,6 @@ function openScoutDetail(code){
       fuBtn.style.display = 'none';
     }
   }
-
-  goTo('s-scout-detail');
 }
 
 // Shared photo-grid renderer for the Scout Detail screen -- real <img>
@@ -6637,11 +6703,16 @@ async function loadFieldDataFromSupabase(){
     fieldGeoData  = newGeo;
     fieldDataLoaded = true;
 
-    // Fetch scout reports for factory dashboard scout status
+    // Fetch scout reports for factory dashboard scout status. Widened
+    // beyond just the status-computation columns to also carry
+    // checklist/photo_urls/notes/id, so the read-only Scout Detail
+    // screen has real data available immediately for every field --
+    // not just ones scouted in the current browser session (which is
+    // all the local scoutDB cache ever had).
     scoutByPlot = {};
     const {data:srData} = await _sb
       .from('scout_reports')
-      .select('plot_no,visit_date,stress_type,stress_severity,follow_up_date,follow_up_required')
+      .select('id,plot_no,visit_date,stress_type,stress_severity,follow_up_date,follow_up_required,checklist,photo_urls,notes')
       .order('visit_date', {ascending:false});
     if(srData) srData.forEach(r=>{
       if(!scoutByPlot[r.plot_no]) scoutByPlot[r.plot_no]=[];
