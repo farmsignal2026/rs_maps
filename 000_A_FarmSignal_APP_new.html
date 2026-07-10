@@ -1740,32 +1740,26 @@ body {
       </div>
     </div>
     <div class="body">
-      <!-- Previous scout summary (no photo) -->
+      <!-- Previous scout -- collapsed by default, expand for full detail -->
       <div style="background:#fff;border-radius:12px;border:1px solid #e8e4da;padding:10px 12px;margin-bottom:10px">
-        <div style="font-size:11px;font-weight:700;color:#185FA5;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px">
-          <i class="ti ti-history" style="font-size:13px"></i> Previous Scout — <span id="fu-prev-date">–</span>
+        <div onclick="toggleFuPrevExpand()" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer">
+          <div style="font-size:11px;font-weight:700;color:#185FA5;text-transform:uppercase;letter-spacing:0.04em">
+            <i class="ti ti-history" style="font-size:13px"></i> Previous Scout — <span id="fu-prev-date">–</span>
+          </div>
+          <button id="fu-prev-toggle" style="background:#E6F1FB;border:1px solid #B5D4F4;color:#185FA5;
+            border-radius:6px;width:22px;height:22px;font-size:14px;font-weight:700;cursor:pointer;line-height:1">+</button>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px">
-          <div style="background:#F1EFE8;border-radius:7px;padding:6px 8px">
-            <div style="font-size:9px;color:#888780">Category</div>
-            <div style="font-weight:600;color:#2C2C2A" id="fu-prev-cat">–</div>
+        <div id="fu-prev-summary" style="font-size:11px;color:#5F5E5A;margin-top:6px"></div>
+        <div id="fu-prev-expanded" style="display:none;margin-top:10px">
+          <div id="fu-prev-checklist" style="margin-bottom:8px"></div>
+          <div style="font-size:11px;color:#5F5E5A;margin-bottom:6px">
+            <span style="font-weight:600">Recommendation given: </span><span id="fu-prev-reco">–</span>
           </div>
-          <div style="background:#F1EFE8;border-radius:7px;padding:6px 8px">
-            <div style="font-size:9px;color:#888780">Sub Category</div>
-            <div style="font-weight:600;color:#2C2C2A" id="fu-prev-subcat">–</div>
+          <div id="fu-prev-remarks-wrap" style="font-size:11px;color:#5F5E5A;margin-bottom:8px">
+            <span style="font-weight:600">Remarks: </span><span id="fu-prev-remarks">–</span>
           </div>
-          <div style="background:#F1EFE8;border-radius:7px;padding:6px 8px">
-            <div style="font-size:9px;color:#888780">Intensity</div>
-            <div style="font-weight:600;color:#994800" id="fu-prev-intensity">–</div>
-          </div>
-          <div style="background:#F1EFE8;border-radius:7px;padding:6px 8px">
-            <div style="font-size:9px;color:#888780">Recommendation</div>
-            <div style="font-weight:600;color:#2C2C2A" id="fu-prev-reco">–</div>
-          </div>
-          <div style="background:#F1EFE8;border-radius:7px;padding:6px 8px;grid-column:1/-1">
-            <div style="font-size:9px;color:#888780">Remarks</div>
-            <div style="font-weight:500;color:#2C2C2A" id="fu-prev-remarks">–</div>
-          </div>
+          <div style="font-size:10px;font-weight:600;color:#888780;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:5px">Photos</div>
+          <div id="fu-prev-photos" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px"></div>
         </div>
       </div>
 
@@ -4231,6 +4225,8 @@ function launchScoutOrSurvey(f, type, stageKey){
   hideScoutBanner();
   if(type === 'scout'){
     openScoutForm(f.code);
+  } else if(type === 'followup'){
+    openFollowup(f.code);
   } else if(stageKey){
     // Exact stage was already chosen (e.g. from the Planner's "Survey Now"
     // button for a specific stage) -- open it directly.
@@ -4240,6 +4236,16 @@ function launchScoutOrSurvey(f, type, stageKey){
     goTo('s-survey-form');
     if(typeof startSurveyForField === 'function') startSurveyForField(idx);
   }
+}
+
+// Convenience wrapper -- looks up the geo record for a field code and
+// runs it through the same 25m geofence check Scout already uses,
+// before opening the Follow-up form. Previously Follow-up could be
+// opened from anywhere with no location check at all.
+function startFollowup(code, btnId){
+  const geoItem = getGeoByCode(code);
+  if(!geoItem){ alert('Field location data not available.'); return; }
+  geoFencedScout(geoItem, 'followup', null, btnId);
 }
 
 function closeDetailPanel() {
@@ -5319,7 +5325,7 @@ function renderScoutAlerts() {
       <button onclick="event.stopPropagation();openScheduleModal('${code}')" style="flex:1;padding:7px;border-radius:7px;background:#E6F1FB;color:#185FA5;border:1px solid #B5D4F4;font-size:11px;font-weight:600;cursor:pointer"><i class="ti ti-edit"></i> Reschedule</button>
       <button onclick="event.stopPropagation();openScoutMapView('${code}')" style="flex:1;padding:7px;border-radius:7px;background:#8B4500;color:#FFE0B8;border:none;font-size:11px;font-weight:600;cursor:pointer"><i class="ti ti-map-pin"></i> Scout Now</button>`;
     else if(st.type==='scouted'||st.type==='overdue') buttons = `
-      <button onclick="event.stopPropagation();openFollowup('${code}')" style="flex:1;padding:7px;border-radius:7px;background:#185FA5;color:#E6F1FB;border:none;font-size:11px;font-weight:600;cursor:pointer"><i class="ti ti-refresh"></i> ${st.type==='overdue'?'⚠ Follow-up Now':'Follow-up Scout'}</button>`;
+      <button onclick="event.stopPropagation();startFollowup('${code}')" style="flex:1;padding:7px;border-radius:7px;background:#185FA5;color:#E6F1FB;border:none;font-size:11px;font-weight:600;cursor:pointer"><i class="ti ti-refresh"></i> ${st.type==='overdue'?'⚠ Follow-up Now':'Follow-up Scout'}</button>`;
     else if(st.type==='closed') buttons = `
       <button onclick="event.stopPropagation();openScoutDetail('${code}')" style="padding:7px 12px;border-radius:7px;background:#F1EFE8;color:#3B6D11;border:1px solid #C0DD97;font-size:11px;font-weight:600;cursor:pointer"><i class="ti ti-eye"></i> View</button>`;
 
@@ -5929,6 +5935,50 @@ function normalizeScoutRecord(code){
   };
 }
 
+// Shared read-only checklist renderer -- same 10 categories/colors as the
+// Scout form itself. Used by both the Scout Detail screen and the
+// Follow-up screen's "Previous Scout" card, so both show identical detail.
+function renderScoutChecklistHTML(checklist){
+  if(!checklist) return '';
+  return SCOUT_CATEGORIES.map(c=>{
+    const entry = checklist[c.key] || {};
+    const statusCol = entry.status ? (SCOUT_STATUS_COLORS[entry.status]||SCOUT_STATUS_COLORS['NIL']) : SCOUT_STATUS_COLORS['NIL'];
+    let subText = '';
+    if(entry.subCat){
+      const subList = Array.isArray(entry.subCat) ? entry.subCat : [entry.subCat];
+      if(subList.length){
+        let labels = subList.slice();
+        if(labels.includes('Other') && entry.otherText) labels = labels.map(l=>l==='Other'?'Other — '+entry.otherText:l);
+        subText = labels.join(', ');
+      }
+    } else if(entry.otherText){
+      subText = entry.otherText;
+    }
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #f1efe8">
+      <span style="font-size:11px;color:#2C2C2A">${c.key}${subText?` <span style="color:#888780">(${subText})</span>`:''}</span>
+      ${entry.status ? `<span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:5px;background:${statusCol.bg};color:${statusCol.col};border:1px solid ${statusCol.border};flex-shrink:0">${entry.status}</span>` : '<span style="font-size:9px;color:#D3D1C7">–</span>'}
+    </div>`;
+  }).join('');
+}
+
+function renderScoutDetailChecklist(s){
+  // Checklist -- read-only view of every category's status/subcategory,
+  // same 10 categories and colors as the Scout form itself.
+  const checklistEl = document.getElementById('sd-checklist');
+  if(s.checklist){
+    checklistEl.innerHTML = renderScoutChecklistHTML(s.checklist);
+  } else if(s.cat || s.intensity) {
+    // No checklist available (e.g. a very old report from before the
+    // checklist column existed) -- fall back to the flattened summary.
+    checklistEl.innerHTML = `<div style="font-size:11px;color:#5F5E5A;padding:6px 0">
+      <div><span style="font-weight:600">Categories flagged: </span>${s.cat || '–'}</div>
+      <div style="margin-top:3px"><span style="font-weight:600">Worst severity: </span>${s.intensity || '–'}</div>
+    </div>`;
+  } else {
+    checklistEl.innerHTML = `<div style="font-size:11px;color:#888780;padding:6px 0">No scout record found for this field yet.</div>`;
+  }
+}
+
 async function openScoutDetail(code){
   const f = getFieldByCode(code);
   if(!f) return;
@@ -5964,39 +6014,7 @@ async function openScoutDetail(code){
   if(s.remarks){ remarksWrap.style.display='block'; document.getElementById('sd-scout-remarks').textContent = s.remarks; }
   else remarksWrap.style.display = 'none';
 
-  // Checklist -- read-only view of every category's status/subcategory,
-  // same 10 categories and colors as the Scout form itself.
-  const checklistEl = document.getElementById('sd-checklist');
-  if(s.checklist){
-    checklistEl.innerHTML = SCOUT_CATEGORIES.map(c=>{
-      const entry = s.checklist[c.key] || {};
-      const statusCol = entry.status ? (SCOUT_STATUS_COLORS[entry.status]||SCOUT_STATUS_COLORS['NIL']) : SCOUT_STATUS_COLORS['NIL'];
-      let subText = '';
-      if(entry.subCat){
-        const subList = Array.isArray(entry.subCat) ? entry.subCat : [entry.subCat];
-        if(subList.length){
-          let labels = subList.slice();
-          if(labels.includes('Other') && entry.otherText) labels = labels.map(l=>l==='Other'?'Other — '+entry.otherText:l);
-          subText = labels.join(', ');
-        }
-      } else if(entry.otherText){
-        subText = entry.otherText;
-      }
-      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #f1efe8">
-        <span style="font-size:11px;color:#2C2C2A">${c.key}${subText?` <span style="color:#888780">(${subText})</span>`:''}</span>
-        ${entry.status ? `<span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:5px;background:${statusCol.bg};color:${statusCol.col};border:1px solid ${statusCol.border};flex-shrink:0">${entry.status}</span>` : '<span style="font-size:9px;color:#D3D1C7">–</span>'}
-      </div>`;
-    }).join('');
-  } else if(s.cat || s.intensity) {
-    // No checklist available (e.g. a very old report from before the
-    // checklist column existed) -- fall back to the flattened summary.
-    checklistEl.innerHTML = `<div style="font-size:11px;color:#5F5E5A;padding:6px 0">
-      <div><span style="font-weight:600">Categories flagged: </span>${s.cat || '–'}</div>
-      <div style="margin-top:3px"><span style="font-weight:600">Worst severity: </span>${s.intensity || '–'}</div>
-    </div>`;
-  } else {
-    checklistEl.innerHTML = `<div style="font-size:11px;color:#888780;padding:6px 0">No scout record found for this field yet.</div>`;
-  }
+  renderScoutDetailChecklist(s);
 
   // Scout photos -- real links, tap to open full-size
   document.getElementById('sd-scout-photos').innerHTML = renderDetailPhotoGrid(s.photoUrls);
@@ -6050,7 +6068,7 @@ async function openScoutDetail(code){
     if(st.type==='scouted' || st.type==='overdue'){
       noFu.style.display = 'block';
       fuBtn.style.display = 'flex';
-      fuBtn.onclick = () => openFollowup(code);
+      fuBtn.onclick = () => startFollowup(code, 'sd-followup-btn');
     } else {
       noFu.style.display = 'none';
       fuBtn.style.display = 'none';
@@ -6079,19 +6097,44 @@ function renderDetailPhotoGrid(urls){
   }).join('');
 }
 
+function toggleFuPrevExpand(){
+  const box = document.getElementById('fu-prev-expanded');
+  const btn = document.getElementById('fu-prev-toggle');
+  const expanded = box.style.display !== 'none';
+  box.style.display = expanded ? 'none' : 'block';
+  btn.textContent = expanded ? '+' : '−';
+}
+
 function openFollowup(code) {
   const f = getFieldByCode(code);
   if(!f) return;
-  const s = scoutDB[code] || {};
+  const s = normalizeScoutRecord(code) || {};
   fuState = { fieldCode:code, adopt:null, crop:null, help:null, photos:[false,false,false], photoData:[null,null,null] };
 
   document.getElementById('fu-header-sub').textContent = f.name+' · '+f.code;
-  document.getElementById('fu-prev-date').textContent = fmtDate(s.scoutDate) || '–';
-  document.getElementById('fu-prev-cat').textContent = s.cat || '–';
-  document.getElementById('fu-prev-subcat').textContent = s.subCat || '–';
-  document.getElementById('fu-prev-intensity').textContent = s.intensity || '–';
-  document.getElementById('fu-prev-reco').textContent = s.recoGiven==='yes'?'Given ✓':'Not Given';
-  document.getElementById('fu-prev-remarks').textContent = s.remarks || '–';
+  document.getElementById('fu-prev-date').textContent = s.scoutDate ? fmtDate(s.scoutDate) : '–';
+
+  // Collapsed-state summary line (visible without expanding)
+  const flaggedCount = s.checklist
+    ? SCOUT_CATEGORIES.filter(c=>!c.noStatus && (s.checklist[c.key]||{}).status && (s.checklist[c.key]||{}).status!=='NIL').length
+    : null;
+  document.getElementById('fu-prev-summary').textContent = flaggedCount!=null
+    ? `${flaggedCount} categor${flaggedCount===1?'y':'ies'} flagged` + (s.intensity ? ` · worst: ${s.intensity}` : '')
+    : (s.cat ? `Flagged: ${s.cat}` : 'No details recorded');
+
+  // Expanded-state detail (built now, shown on tap)
+  document.getElementById('fu-prev-checklist').innerHTML = s.checklist
+    ? renderScoutChecklistHTML(s.checklist)
+    : `<div style="font-size:11px;color:#5F5E5A"><span style="font-weight:600">Categories flagged: </span>${s.cat || '–'}</div>`;
+  document.getElementById('fu-prev-reco').textContent = s.recoGiven==='yes' ? 'Yes ✓' : s.recoGiven==='no' ? 'No' : '–';
+  const fuPrevRemarksWrap = document.getElementById('fu-prev-remarks-wrap');
+  if(s.remarks){ fuPrevRemarksWrap.style.display='block'; document.getElementById('fu-prev-remarks').textContent = s.remarks; }
+  else fuPrevRemarksWrap.style.display = 'none';
+  document.getElementById('fu-prev-photos').innerHTML = renderDetailPhotoGrid(s.photoUrls);
+
+  // Always start collapsed
+  document.getElementById('fu-prev-expanded').style.display = 'none';
+  document.getElementById('fu-prev-toggle').textContent = '+';
 
   renderFollowupNdviComparison(getGeoByCode(code));
 
