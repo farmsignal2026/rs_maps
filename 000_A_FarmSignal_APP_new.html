@@ -2934,6 +2934,11 @@ function renderFields() {
     );
   }
 
+  // Sort A-Z by farmer name -- previously the list just followed
+  // whatever order the data loaded in (Supabase query order), which
+  // isn't predictable or useful for finding a specific farmer.
+  list = list.slice().sort((a,b) => a.name.localeCompare(b.name));
+
   const countEl = document.getElementById('list-count');
   if(countEl) countEl.textContent = list.length + (list.length===1?' plot':' plots');
 
