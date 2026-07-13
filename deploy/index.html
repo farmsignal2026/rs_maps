@@ -1217,6 +1217,7 @@ td.mono{font-family:'DM Mono',monospace;font-size:11px}
                   <button class="cmp-grp-btn active" id="saViewStatus" onclick="setSaView('status')">Scout Status</button>
                   <button class="cmp-grp-btn" id="saViewReasons" onclick="setSaView('reasons')">Top Reasons</button>
                   <button class="cmp-grp-btn" id="saViewFollowup" onclick="setSaView('followup')">Follow-up Health</button>
+                  <button class="cmp-grp-btn" id="saViewYield" onclick="setSaView('yield')">Expect Yield</button>
                 </div>
               </div>
               <div class="tc-divider"></div>
@@ -7287,8 +7288,9 @@ var scoutAnalyticsChartInst=null;
 
 function setSaView(v){
   saView=v;
-  ['saViewStatus','saViewReasons','saViewFollowup'].forEach(function(id){
-    document.getElementById(id).classList.toggle('active', id==='saView'+v.charAt(0).toUpperCase()+v.slice(1));
+  ['saViewStatus','saViewReasons','saViewFollowup','saViewYield'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(el) el.classList.toggle('active', id==='saView'+v.charAt(0).toUpperCase()+v.slice(1));
   });
   renderScoutAnalytics();
 }
@@ -7307,8 +7309,16 @@ function setSaMetric(m){
 
 // Same growth-stage-independent checklist categories the mobile Scout form
 // uses. Order matches the mobile app's SCOUT_CATEGORIES.
+// Categories that represent actual crop problems -- used in Top Reasons
+// charts and the Overview Reasons table. Expect Yield is deliberately
+// excluded: it's an outcome/estimate, not a reason for poor health.
 var SA_CATEGORIES=['Population Gap','Weed','Nutrient Deficit','Irrigation Deficit',
-  'Waterlogging','Pest','Disease','Soil Problem','Expect Yield','Others'];
+  'Waterlogging','Pest','Disease','Soil Problem','Others'];
+
+// Yield buckets -- shown in the separate Expect Yield tab, not mixed
+// with the problem-reason categories above.
+var SA_YIELD_BUCKETS=['Early to Estimate','<30','30-40','40-50','>50'];
+var SA_YIELD_COLORS={'Early to Estimate':'#94a3b8','<30':'#dc2626','30-40':'#f07c2a','40-50':'#86efac','>50':'#166534'};
 
 var SDM_STATUS_COLORS={
   'NIL':         {bg:'#F1EFE8', col:'#5F5E5A', border:'#D3D1C7'},
@@ -7501,6 +7511,7 @@ function renderScoutAnalytics(){
 
   if(saView==='status') saRenderStatus(meta, plotIDs);
   else if(saView==='reasons') saRenderReasons(meta, plotIDs);
+  else if(saView==='yield') saRenderYield(meta, plotIDs);
   else saRenderFollowup(meta, plotIDs);
 }
 
@@ -7531,9 +7542,7 @@ function saRenderStatus(meta, plotIDs){
 }
 
 function saRenderReasons(meta, plotIDs){
-  // Latest scout report per plot only -- a plot's current problem profile,
-  // not every historical visit stacked together.
-  var groups={}; // {group: {category: count, total: <plots with ANY report>}}
+  var groups={};
   var plotSet=new Set(plotIDs);
   Object.keys(scoutByPlot).forEach(function(pid){
     if(!plotSet.has(pid)) return;
@@ -7543,39 +7552,27 @@ function saRenderReasons(meta, plotIDs){
     var g=saGroupVal(meta,pid);
     if(!groups[g]){ groups[g]={total:0}; SA_CATEGORIES.forEach(function(c){groups[g][c]=0;}); }
     groups[g].total++;
-
     if(latest.checklist){
       SA_CATEGORIES.forEach(function(cat){
         var entry=latest.checklist[cat];
         if(!entry) return;
-        if(cat==='Expect Yield'){
-          // Not a severity flag -- flagged as a "reason" here only when
-          // the yield estimate itself is low (<30 t/acre bucket).
-          if(entry.subCat==='<30') groups[g][cat]++;
-        } else if(entry.status==='Severe' || entry.status==='Very Severe'){
-          // Only Severe/Very Severe count as a "top reason" -- Low/
-          // Moderate are watch-level, not what's driving poor crop
-          // health, and counting them the same would understate how
-          // concentrated the real problems actually are.
-          groups[g][cat]++;
-        }
+        if(entry.status==='Severe' || entry.status==='Very Severe') groups[g][cat]++;
       });
     } else if(latest.stress_type && latest.stress_type.length){
-      // Older report from before the checklist column existed -- fall
-      // back to the flattened stress_type array (won't have Waterlogging/
-      // Soil Problem/Others/Expect Yield detail, only whatever the old
-      // flat list happened to capture).
       latest.stress_type.forEach(function(t){
         if(groups[g][t]!==undefined) groups[g][t]++;
       });
     }
   });
 
-  var groupNames=saSortGroupsByTotal(groups);
-  // tab10 -- a qualitative palette designed so all 10 stay distinguishable
-  // from each other (including under common color-vision deficiencies),
-  // unlike the previous set where a few colors sat too close together.
-  var catColors=['#1f77b4','#2ca02c','#d62728','#17becf','#9467bd','#ff7f0e','#8c564b','#7f7f7f','#bcbd22','#e377c2'];
+  // Sort by descending total flag count so most-flagged group is on top
+  var groupNames=Object.keys(groups).sort(function(a,b){
+    var sumA=SA_CATEGORIES.reduce(function(s,c){return s+(groups[a][c]||0);},0);
+    var sumB=SA_CATEGORIES.reduce(function(s,c){return s+(groups[b][c]||0);},0);
+    return sumB-sumA;
+  });
+
+  var catColors=['#1f77b4','#2ca02c','#d62728','#17becf','#9467bd','#ff7f0e','#8c564b','#7f7f7f','#e377c2'];
   var datasets=SA_CATEGORIES.map(function(cat,i){
     return {
       label:cat, backgroundColor:catColors[i%catColors.length]+'cc', borderColor:catColors[i%catColors.length], borderWidth:1, borderRadius:3,
@@ -7586,9 +7583,52 @@ function saRenderReasons(meta, plotIDs){
     };
   });
   document.getElementById('saTitle').textContent='Top reasons by '+saGroupLabel();
-  document.getElementById('saSubtitle').textContent='Severe/Very Severe only, latest scout visit per plot · Yield = flagged when estimate is under 30 t/acre · bars are NOT stacked, since one plot can be flagged for several reasons at once';
-  saDrawChart(groupNames, datasets, saMetric==='pct'?'% of scouted plots (can exceed 100% combined -- not stacked)':'Number of plots flagged', false);
+  document.getElementById('saSubtitle').textContent='Severe/Very Severe only · latest scout visit per plot · sorted by most flags on top · Expect Yield shown in its own tab';
+  saDrawChart(groupNames, datasets, saMetric==='pct'?'% of scouted plots':'Number of plots flagged', false);
 }
+
+function saRenderYield(meta, plotIDs){
+  var BUCKETS=SA_YIELD_BUCKETS;
+  var groups={};
+  var plotSet=new Set(plotIDs);
+  Object.keys(scoutByPlot).forEach(function(pid){
+    if(!plotSet.has(pid)) return;
+    var reports=scoutByPlot[pid].slice().sort(function(a,b){return (b.visit_date||'').localeCompare(a.visit_date||'');});
+    var latest=reports[0];
+    if(!latest || !latest.checklist) return;
+    var entry=latest.checklist['Expect Yield'];
+    if(!entry || !entry.subCat) return;
+    var bucket=entry.subCat;
+    if(BUCKETS.indexOf(bucket)===-1) return;
+    var g=saGroupVal(meta,pid);
+    if(!groups[g]){ groups[g]={total:0}; BUCKETS.forEach(function(b){groups[g][b]=0;}); }
+    groups[g][bucket]++;
+    groups[g].total++;
+  });
+
+  var groupNames=Object.keys(groups).sort(function(a,b){return groups[b].total-groups[a].total;});
+  if(!groupNames.length){
+    document.getElementById('saTitle').textContent='Expect Yield by '+saGroupLabel();
+    document.getElementById('saSubtitle').textContent='No yield estimates recorded yet in the current filter.';
+    if(scoutAnalyticsChartInst){scoutAnalyticsChartInst.destroy();scoutAnalyticsChartInst=null;}
+    return;
+  }
+
+  var datasets=BUCKETS.map(function(b){
+    var col=SA_YIELD_COLORS[b];
+    return {
+      label:b, backgroundColor:col+'cc', borderColor:col, borderWidth:1, borderRadius:3,
+      data:groupNames.map(function(g){
+        if(saMetric==='pct') return groups[g].total? Math.round(groups[g][b]/groups[g].total*100):0;
+        return groups[g][b]||0;
+      })
+    };
+  });
+  document.getElementById('saTitle').textContent='Expect Yield distribution by '+saGroupLabel();
+  document.getElementById('saSubtitle').textContent='Latest scout visit per plot · from lowest (<30) to highest (>50 t/acre) · stacked since each plot has exactly one bucket';
+  saDrawChart(groupNames, datasets, saMetric==='pct'?'% of estimates':'Number of plots', true);
+}
+
 
 function saRenderFollowup(meta, plotIDs){
   var outcomes=['Improved','Same-Status','Still-Worst'];
