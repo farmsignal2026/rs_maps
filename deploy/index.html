@@ -1816,6 +1816,54 @@ document.addEventListener('DOMContentLoaded',()=>{
   if(pw) pw.addEventListener('keydown',e=>{ if(e.key==='Enter') sbDoLogin(); });
   const em=document.getElementById('sbEmail');
   if(em) em.addEventListener('keydown',e=>{ if(e.key==='Enter') document.getElementById('sbPassword').focus(); });
+
+  // Restore a previous session so the dashboard doesn't force re-login
+  // on every refresh. Supabase already stores the auth token in
+  // localStorage automatically -- we just need to check it's still valid
+  // and, if so, rebuild currentOfficer and load data directly.
+  (async ()=>{
+    try{
+      const {data:{session}} = await getSB().auth.getSession();
+      if(!session) return; // no stored session, show login normally
+
+      // Session valid -- fetch officer profile (same as sbDoLogin does)
+      const {data:officers} = await getSB()
+        .from('farm_officers')
+        .select('id,name,role,factory_code,division_code')
+        .eq('auth_user_id', session.user.id)
+        .eq('is_active', true)
+        .limit(1);
+
+      if(officers && officers.length){
+        const o = officers[0];
+        let divCodes = [];
+        if(o.role==='officer' || o.role==='viewer'){
+          const {data:odRows} = await getSB()
+            .from('officer_divisions').select('division_code').eq('officer_id', o.id);
+          if(odRows && odRows.length) divCodes = odRows.map(r=>r.division_code);
+          else if(o.division_code) divCodes = [o.division_code];
+        }
+        currentOfficer = {name:o.name, role:o.role, factory_code:o.factory_code||null, division_codes:divCodes};
+      } else {
+        currentOfficer = {name:session.user.email, role:'admin', factory_code:null, division_codes:[]};
+      }
+
+      // Restore the UI state the same way sbDoLogin does
+      const userBar = document.getElementById('sbUserBar');
+      if(userBar){
+        userBar.style.display='flex';
+        document.getElementById('sbUserName').textContent = '✓ '+(currentOfficer.name||'User')+' ('+currentOfficer.role+')';
+      }
+      const signInBtn = document.getElementById('sbSignInBtn');
+      if(signInBtn) signInBtn.style.display='none';
+
+      await loadFromSupabase();
+      hideLandingPage();
+    } catch(e){
+      console.log('Session restore skipped:', e.message);
+      // Leave the login screen visible -- user will sign in manually
+    }
+  })();
 });
 
 let rawS=null,rawF=null,rawS1=null,rawPC=null,pngMap={},photosByPlot={},scoutByPlot={},followupsByReportId={},fileS=null,fileF=null,fileS1=null,filePC=null,allRows=[],filteredRows=[],activeTab='trend',chartInst=null;

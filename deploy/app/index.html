@@ -3818,11 +3818,48 @@ updateBackButtons('s-dashboard');
 
 // Init cache DB and check sync queue on startup
 document.addEventListener('DOMContentLoaded', ()=>{
-  openCacheDB().then(()=>{
+  openCacheDB().then(async ()=>{
     updateSyncBadge();
     updateNetworkStatus(navigator.onLine);
     if(navigator.onLine) syncOfflineQueue();
-  }).catch(e=>console.warn('Cache DB init failed:', e));
+
+    // Try to restore a previous session so the officer doesn't have to
+    // log in again on every refresh. Supabase already persists the auth
+    // token in localStorage -- we just need to check if it's still valid
+    // and, if so, restore the currentUser profile from IndexedDB cache
+    // (where we saved it after the original login).
+    try {
+      const sb = getSB();
+      const { data: { session } } = await sb.auth.getSession();
+      if(session){
+        // Auth token still valid -- try to restore the full officer profile
+        const cached = await cacheGet('app_state','currentUser');
+        if(cached && cached.officerId){
+          currentUser = cached;
+          // Re-derive factory name display (in case it changed)
+          const titleText = 'FarmSignal' + (currentUser.factoryName ? ' — '+currentUser.factoryName : '');
+          ['app-title-fields','app-title-home'].forEach(id=>{
+            const el=document.getElementById(id);
+            if(el) el.textContent=titleText;
+          });
+          goTo(currentUser.landingScreen || 's-home');
+          // Load fresh field data and notifications silently in background
+          loadFieldDataFromSupabase().then(loaded=>{
+            if(loaded) saveFieldsToCache(ALL_FIELDS, fieldGeoData);
+          });
+          loadNotifications();
+          return; // skip login screen
+        }
+      }
+    } catch(e){
+      console.log('Session restore failed, showing login:', e.message);
+    }
+    // No valid session -- show login screen as normal
+    goTo('s-login');
+  }).catch(e=>{
+    console.warn('Cache DB init failed:', e);
+    goTo('s-login');
+  });
 });
 
 // =============================================
