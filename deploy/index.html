@@ -2131,8 +2131,13 @@ function computeAllTrendInsights(data){
 }
 
 function getPlotCoverageStats(){
-  const total=fieldDetailsPlotIDs.length;
-  const mapped=fieldDetailsPlotIDs.filter(pid=>boundaryByPlotID[pid]).length;
+  // Use filteredRows so Mapped Status responds to Client/Division/
+  // Crop Type filters -- previously used fieldDetailsPlotIDs which
+  // was a fixed global list, always showing the total regardless of
+  // whatever filters were active.
+  const plotIDs=[...new Set(latestPerField(filteredRows).map(r=>r.plotID).filter(Boolean))];
+  const total=plotIDs.length;
+  const mapped=plotIDs.filter(pid=>boundaryByPlotID[pid]).length;
   return {total, mapped, notMapped:total-mapped};
 }
 let tab3On=false,tab4On=true,tab5On=true,tab6On=true;   // optional-tab include/exclude checkboxes -- tab3 (S1) off by default
@@ -3401,6 +3406,9 @@ function renderAll(){
   else if(activeTab==='trend')renderTrend();
   else if(activeTab==='compare')renderCompare();
   else if(activeTab==='map')renderFieldMap(viewData);
+  else if(activeTab==='overview')renderOverview();
+  else if(activeTab==='insights')renderInsights();
+  else if(activeTab==='scoutAnalytics')renderScoutAnalytics();
   // badge reflects the stat card filter if active
   const fields=[...new Set(viewData.map(r=>r.fieldName))];
   const suffix=statCardFilter?' ('+statCardFilter+')':'';
