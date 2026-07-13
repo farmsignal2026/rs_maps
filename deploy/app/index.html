@@ -4844,30 +4844,71 @@ const SCOUT_STATUS_COLORS = {
   'Severe':      {bg:'#fde8d0', col:'#994800', border:'#f07c2a'},
   'Very Severe': {bg:'#fde8e8', col:'#a00000', border:'#ef4444'},
 };
+// Expect Yield's buckets carry their own inherent severity meaning --
+// a low tonnage estimate is a bad sign no matter what, unlike the other
+// checklist categories where severity is a separate judgement from what
+// was picked. So these buttons are always tinted by what they mean, not
+// just tinted when selected (like every other chip in this form).
+const YIELD_BUCKET_COLORS = {
+  'Early to Estimate': {bg:'#F1EFE8', col:'#5F5E5A', border:'#D3D1C7'},
+  '<30':               {bg:'#fde8e8', col:'#a00000', border:'#ef4444'}, // Very Severe red
+  '30-40':              {bg:'#fde8d0', col:'#994800', border:'#f07c2a'}, // Severe orange
+  '40-50':              {bg:'#d4f4dc', col:'#1a7a2e', border:'#2ea84a'}, // light green
+  '>50':                {bg:'#bdead0', col:'#0f4d2e', border:'#166534'}, // dark green
+};
 
 function renderScoutFormChips() {
   const wrap = document.getElementById('scout-checklist');
   if(!wrap) return;
   wrap.innerHTML = SCOUT_CATEGORIES.map(c=>{
     const key = c.key.replace(/\s+/g,'-');
-    // Sub-row visibility on a fresh render: always visible for
-    // alwaysSub categories (Expect Yield, and now Pest/Disease --
-    // "which pest/disease" is picked before rating its severity).
-    const showSub = c.alwaysSub;
-    // Status row visibility on a fresh render: subFirst categories
-    // (Pest/Disease) start with Status hidden until a subcategory is
-    // picked (see setScoutSubCat); everything else shows Status upfront.
-    const showStatusInitially = !c.subFirst;
 
-    const subBlock = c.sub ? `
-        <div id="sub-row-${key}" style="display:${showSub?'flex':'none'};gap:4px;flex-wrap:wrap;margin-bottom:${c.subFirst?'7px':'0'}">
+    // Pest/Disease: true per-subcategory severity. Selecting a pest/
+    // disease no longer shares one severity with everything else picked
+    // under the same category -- each gets its own inline row, since
+    // e.g. White Grub and ESB can genuinely be at different severities
+    // on the same plot. Rendered as a distinct block from everything else.
+    if(c.multi && c.subFirst){
+      const subChips = `
+        <div id="sub-row-${key}" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">
           ${c.sub.map(s=>`
             <button onclick="setScoutSubCat('${c.key}','${s}')" id="scat-${key}-${s.replace(/\s+/g,'-').replace(/[<>]/g,'')}"
               style="padding:4px 8px;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer;
               border:1.5px solid #D3D1C7;background:#F1EFE8;color:#5F5E5A">${s}</button>
           `).join('')}
+        </div>`;
+      return `
+      <div style="background:#fff;border-radius:8px;border:1px solid #e8e4da;padding:8px 10px;margin-bottom:6px">
+        <div style="font-size:11px;font-weight:600;color:#2C2C2A;margin-bottom:6px">${c.key}
+          <span style="font-weight:400;color:#888780;font-size:9px">(tap each present, then rate its own severity)</span>
         </div>
-        <div id="other-wrap-${key}" style="display:none;margin-bottom:${c.subFirst?'7px':'0'}">
+        ${subChips}
+        <div id="other-wrap-${key}" style="display:none;margin-bottom:6px">
+          <input type="text" id="other-text-${key}" placeholder="Specify..."
+            style="width:100%;padding:6px 8px;border:1.5px solid #D3D1C7;border-radius:6px;
+            font-size:11px;color:#2C2C2A;box-sizing:border-box;font-family:inherit"/>
+        </div>
+        <div id="sub-severity-rows-${key}"></div>
+      </div>`;
+    }
+
+    // Sub-row visibility on a fresh render: always visible for
+    // alwaysSub categories (Expect Yield). Status row: shown upfront for
+    // everything else (Pest/Disease no longer use this path at all).
+    const showSub = c.alwaysSub;
+
+    const subBlock = c.sub ? `
+        <div id="sub-row-${key}" style="display:${showSub?'flex':'none'};gap:4px;flex-wrap:wrap;margin-bottom:0">
+          ${c.sub.map(s=>{
+            const yc = c.key==='Expect Yield' ? YIELD_BUCKET_COLORS[s] : null;
+            const style = yc
+              ? `padding:4px 8px;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;border:1.5px solid ${yc.border};background:${yc.bg};color:${yc.col}`
+              : `padding:4px 8px;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer;border:1.5px solid #D3D1C7;background:#F1EFE8;color:#5F5E5A`;
+            return `<button onclick="setScoutSubCat('${c.key}','${s}')" id="scat-${key}-${s.replace(/\s+/g,'-').replace(/[<>]/g,'')}"
+              style="${style}">${s}</button>`;
+          }).join('')}
+        </div>
+        <div id="other-wrap-${key}" style="display:none;margin-bottom:0">
           <input type="text" id="other-text-${key}" placeholder="Specify..."
             style="width:100%;padding:6px 8px;border:1.5px solid #D3D1C7;border-radius:6px;
             font-size:11px;color:#2C2C2A;box-sizing:border-box;font-family:inherit"/>
@@ -4879,7 +4920,7 @@ function renderScoutFormChips() {
         </div>` : '');
 
     const statusBlock = c.noStatus ? '' : `
-        <div style="display:${showStatusInitially?'flex':'none'};gap:3px;flex-wrap:wrap" id="status-row-${key}">
+        <div style="display:flex;gap:3px;flex-wrap:wrap" id="status-row-${key}">
           ${SCOUT_STATUS_LEVELS.map(lvl=>`
             <button onclick="setScoutStatus('${c.key}','${lvl}')" id="stat-${key}-${lvl.replace(/\s+/g,'-')}"
               style="flex:1;min-width:52px;padding:5px 2px;border-radius:6px;font-size:9px;font-weight:700;
@@ -4890,10 +4931,53 @@ function renderScoutFormChips() {
 
     return `
       <div style="background:#fff;border-radius:8px;border:1px solid #e8e4da;padding:8px 10px;margin-bottom:6px">
-        <div style="font-size:11px;font-weight:600;color:#2C2C2A;margin-bottom:6px">${c.key}${c.subFirst?' <span style="font-weight:400;color:#888780;font-size:9px">(select pest/disease present, then rate severity)</span>':''}${c.optional?' <span style="font-weight:400;color:#888780;font-size:9px">(optional)</span>':''}</div>
-        ${c.subFirst ? subBlock + statusBlock : statusBlock + subBlock}
+        <div style="font-size:11px;font-weight:600;color:#2C2C2A;margin-bottom:6px">${c.key}${c.optional?' <span style="font-weight:400;color:#888780;font-size:9px">(optional)</span>':''}</div>
+        ${statusBlock}${subBlock ? '<div style="margin-top:7px;padding-top:7px;border-top:1px dashed #e8e4da">'+subBlock+'</div>' : ''}
       </div>`;
   }).join('');
+}
+
+// Renders one severity row per currently-selected pest/disease for a
+// multi+subFirst category (Pest/Disease). Called whenever the selection
+// changes, so rows appear/disappear as items are ticked on/off.
+function renderSubSeverityRows(catKey){
+  const key = catKey.replace(/\s+/g,'-');
+  const container = document.getElementById('sub-severity-rows-'+key);
+  if(!container) return;
+  const p = scoutState.problems[catKey] || {};
+  const selected = Array.isArray(p.subCat) ? p.subCat : [];
+  if(!p.subSeverities) p.subSeverities = {};
+
+  container.innerHTML = selected.map(sub=>{
+    const subKey = sub.replace(/\s+/g,'-').replace(/[<>]/g,'');
+    const current = p.subSeverities[sub];
+    return `
+      <div style="margin-top:6px;padding-top:6px;border-top:1px dashed #e8e4da">
+        <div style="font-size:10px;font-weight:600;color:#5F5E5A;margin-bottom:4px">${sub}</div>
+        <div style="display:flex;gap:3px;flex-wrap:wrap">
+          ${['Low','Moderate','Severe','Very Severe'].map(lvl=>{
+            const lvlKey = lvl.replace(/\s+/g,'-');
+            const active = current===lvl;
+            const sc = SCOUT_STATUS_COLORS[lvl];
+            return `<button onclick="setSubSeverity('${catKey}','${sub.replace(/'/g,"\\'")}','${lvl}')"
+              id="substat-${key}-${subKey}-${lvlKey}"
+              style="flex:1;min-width:48px;padding:4px 2px;border-radius:5px;font-size:8px;font-weight:700;
+              cursor:pointer;text-align:center;border:1.5px solid ${active?sc.border:'#D3D1C7'};
+              background:${active?sc.bg:'#F1EFE8'};color:${active?sc.col:'#5F5E5A'}">${lvl}</button>`;
+          }).join('')}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// Sets the severity for ONE specific selected pest/disease -- not the
+// whole category. This is the actual per-subcategory severity the old
+// shared-status design didn't support.
+function setSubSeverity(catKey, sub, level){
+  if(!scoutState.problems[catKey]) scoutState.problems[catKey] = {};
+  if(!scoutState.problems[catKey].subSeverities) scoutState.problems[catKey].subSeverities = {};
+  scoutState.problems[catKey].subSeverities[sub] = level;
+  renderSubSeverityRows(catKey);
 }
 
 function setScoutStatus(catKey, level) {
@@ -4913,25 +4997,7 @@ function setScoutStatus(catKey, level) {
     b.style.borderWidth = active ? '2px' : '1.5px';
   });
 
-  // Pest/Disease: only show the subcategory row once a real problem is
-  // flagged (non-NIL) -- naming a specific pest/disease before that
-  // doesn't make sense. Expect Yield's subcategory row is always visible
-  // (set with alwaysSub above) since it's not a severity judgement.
   const cat = SCOUT_CATEGORIES.find(c=>c.key===catKey);
-  if(cat && cat.sub && !cat.alwaysSub){
-    const subRow = document.getElementById('sub-row-'+key);
-    if(subRow) subRow.style.display = (level && level!=='NIL') ? 'flex' : 'none';
-    if(!level || level==='NIL'){
-      scoutState.problems[catKey].subCat = cat.multi ? [] : null;
-      cat.sub.forEach(s=>{
-        const b = document.getElementById('scat-'+key+'-'+s.replace(/\s+/g,'-').replace(/[<>]/g,''));
-        if(b){ b.style.background='#F1EFE8'; b.style.color='#5F5E5A'; b.style.borderColor='#D3D1C7'; }
-      });
-      const otherWrap = document.getElementById('other-wrap-'+key);
-      if(otherWrap) otherWrap.style.display = 'none';
-    }
-  }
-
   // Others (and any other freeText-but-no-subcategory category): show a
   // description box once flagged (non-NIL), hide + clear it on NIL.
   if(cat && cat.freeText && !cat.sub){
@@ -4972,28 +5038,36 @@ function setScoutSubCat(catKey, sub) {
     const b = document.getElementById('scat-'+key+'-'+s.replace(/\s+/g,'-').replace(/[<>]/g,''));
     if(!b) return;
     const active = activeSet.has(s);
-    b.style.background = active ? '#27500A' : '#F1EFE8';
-    b.style.color       = active ? '#EAF3DE' : '#5F5E5A';
-    b.style.borderColor = active ? '#27500A' : '#D3D1C7';
+    if(catKey==='Expect Yield'){
+      // Keep each bucket's own severity-meaning color always -- selection
+      // just makes the border thicker, doesn't switch to an unrelated color.
+      const yc = YIELD_BUCKET_COLORS[s];
+      b.style.background = yc.bg;
+      b.style.color = yc.col;
+      b.style.borderColor = yc.border;
+      b.style.borderWidth = active ? '2.5px' : '1.5px';
+    } else {
+      b.style.background = active ? '#27500A' : '#F1EFE8';
+      b.style.color       = active ? '#EAF3DE' : '#5F5E5A';
+      b.style.borderColor = active ? '#27500A' : '#D3D1C7';
+    }
   });
 
   const otherWrap = document.getElementById('other-wrap-'+key);
   if(otherWrap) otherWrap.style.display = activeSet.has('Other') ? 'block' : 'none';
 
-  // subFirst categories (Pest/Disease): Status only becomes relevant once
-  // at least one pest/disease is actually selected -- reveal it then, and
-  // hide + clear it again if everything gets deselected.
-  if(cat.subFirst){
-    const hasAny = cat.multi ? p.subCat.length>0 : !!p.subCat;
-    const statusRow = document.getElementById('status-row-'+key);
-    if(statusRow) statusRow.style.display = hasAny ? 'flex' : 'none';
-    if(!hasAny){
-      p.status = null;
-      SCOUT_STATUS_LEVELS.forEach(lvl=>{
-        const b = document.getElementById('stat-'+key+'-'+lvl.replace(/\s+/g,'-'));
-        if(b){ b.style.background='#F1EFE8'; b.style.color='#5F5E5A'; b.style.borderColor='#D3D1C7'; b.style.borderWidth='1.5px'; }
+  if(cat.multi && cat.subFirst){
+    // Pest/Disease: each selected item gets its own severity row (see
+    // renderSubSeverityRows) -- no shared category-level status anymore.
+    // Clean up severity data for anything just deselected, so it doesn't
+    // linger and get included if the same pest is reselected later with
+    // a stale severity already set.
+    if(p.subSeverities){
+      Object.keys(p.subSeverities).forEach(s=>{
+        if(!activeSet.has(s)) delete p.subSeverities[s];
       });
     }
+    renderSubSeverityRows(catKey);
   }
 }
 
@@ -5614,18 +5688,34 @@ async function submitScout() {
     const v = (problems[c.key]||{}).subCat;
     return c.multi ? Array.isArray(v) && v.length>0 : !!v;
   };
+  const rankOf = {'NIL':0,'Low':1,'Moderate':2,'Severe':3,'Very Severe':4};
+  // Worst severity among a Pest/Disease category's per-item ratings --
+  // this is now the category's "status" for every purpose downstream
+  // (stress_type/stress_severity, reports, exports), computed from the
+  // real per-subcategory data instead of one shared value.
+  const worstSubSeverity = sevMap => {
+    let worst = null;
+    Object.values(sevMap||{}).forEach(s=>{ if(!worst || rankOf[s]>rankOf[worst]) worst = s; });
+    return worst;
+  };
+  // Category-level status for ANY category, Pest/Disease included --
+  // shared helper used everywhere below instead of reading
+  // problems[c.key].status directly (which no longer exists for
+  // Pest/Disease -- they only have per-item subSeverities now).
+  const statusOf = c => {
+    if(c.multi && c.subFirst) return worstSubSeverity((problems[c.key]||{}).subSeverities) || 'NIL';
+    return (problems[c.key]||{}).status || 'NIL';
+  };
 
   // Status requirement:
   //  - noStatus categories (Expect Yield): no status at all, skip.
-  //  - subFirst categories (Pest/Disease): optional overall -- leaving
-  //    every chip untouched means "nothing present" (implicit NIL). But
-  //    once at least one pest/disease is flagged, its severity becomes
-  //    mandatory -- can't name a pest and skip rating it.
+  //  - Pest/Disease (multi+subFirst): no category-level status to check
+  //    here at all anymore -- see the per-subcategory severity check
+  //    below instead, which is the real requirement now.
   //  - optional categories (Others): genuinely optional, skip entirely.
   //  - everything else: status always mandatory, as before.
   const missingStatus = SCOUT_CATEGORIES
-    .filter(c => !c.noStatus && !c.optional)
-    .filter(c => c.subFirst ? hasSubCat(c) : true)
+    .filter(c => !c.noStatus && !c.optional && !(c.multi && c.subFirst))
     .filter(c => !(problems[c.key] && problems[c.key].status))
     .map(c => c.key);
   if(missingStatus.length){
@@ -5633,13 +5723,31 @@ async function submitScout() {
     return;
   }
 
+  // Per-subcategory severity requirement (Pest/Disease): every pest/
+  // disease actually picked needs its OWN severity rated -- can't name
+  // one and leave it unrated. Leaving the whole category untouched is
+  // still fine (means "nothing present", recorded as NIL).
+  const missingSubSeverity = SCOUT_CATEGORIES
+    .filter(c => c.multi && c.subFirst)
+    .flatMap(c => {
+      const p = problems[c.key] || {};
+      const selected = Array.isArray(p.subCat) ? p.subCat : [];
+      const sevMap = p.subSeverities || {};
+      return selected.filter(s => !sevMap[s]).map(s => c.key+': '+s);
+    });
+  if(missingSubSeverity.length){
+    alert('Please rate severity for: ' + missingSubSeverity.join(', '));
+    return;
+  }
+
   // Subcategory requirement: Expect Yield always needs its (single)
   // bucket -- it's an estimate, not a problem severity, so it's asked on
-  // every visit regardless. Pest/Disease are intentionally NOT required
-  // here -- see missingStatus above, they're optional unless flagged.
+  // every visit regardless. Pest/Disease are handled entirely by the
+  // missingSubSeverity check above (picking a pest AND rating it are now
+  // effectively one combined requirement).
   const missingSubCat = SCOUT_CATEGORIES
     .filter(c => c.sub && !c.subFirst)
-    .filter(c => c.alwaysSub || (problems[c.key]||{}).status !== 'NIL')
+    .filter(c => c.alwaysSub || statusOf(c) !== 'NIL')
     .filter(c => !hasSubCat(c))
     .map(c => c.key);
   if(missingSubCat.length){
@@ -5653,7 +5761,7 @@ async function submitScout() {
   const hasOther = c => {
     const v = (problems[c.key]||{}).subCat;
     if(c.sub) return c.multi ? Array.isArray(v) && v.includes('Other') : v === 'Other';
-    if(c.freeText) return (problems[c.key]||{}).status && problems[c.key].status !== 'NIL';
+    if(c.freeText) return statusOf(c) !== 'NIL';
     return false;
   };
   const missingOtherText = SCOUT_CATEGORIES
@@ -5678,9 +5786,6 @@ async function submitScout() {
   // Categories flagged as an actual problem (non-NIL) -- these drive
   // stress_type/stress_severity. Expect Yield is tracked separately since
   // it's an estimate, not a stress indicator (and has no status at all).
-  // Untouched Pest/Disease (nothing flagged) default to 'NIL' here even
-  // though the user never explicitly tapped it.
-  const statusOf = c => (problems[c.key]||{}).status || 'NIL';
   const flagged = SCOUT_CATEGORIES.filter(c => !c.noStatus && statusOf(c) !== 'NIL');
   const stressTypes = flagged.map(c => c.key);
 
@@ -5697,6 +5802,20 @@ async function submitScout() {
   // Expect Yield has no status, so it's rendered as just "Expect Yield: (bucket)".
   const catNotes = SCOUT_CATEGORIES.map(c=>{
     const p = problems[c.key] || {};
+    if(c.multi && c.subFirst){
+      const selected = Array.isArray(p.subCat) ? p.subCat : [];
+      if(!selected.length) return c.key + ': NIL';
+      const sevMap = p.subSeverities || {};
+      const parts = selected.map(s=>{
+        let label = s;
+        if(s==='Other'){
+          const otherVal = (document.getElementById('other-text-'+c.key.replace(/\s+/g,'-'))||{}).value||'';
+          if(otherVal) label = 'Other — ' + otherVal;
+        }
+        return label + ' (' + (sevMap[s]||'NIL') + ')';
+      });
+      return c.key + ': ' + parts.join(', ');
+    }
     let line = c.key + (c.noStatus ? '' : ': ' + (p.status || 'NIL'));
     if(p.subCat && (!Array.isArray(p.subCat) || p.subCat.length)){
       const subList = Array.isArray(p.subCat) ? p.subCat : [p.subCat];
@@ -5732,6 +5851,30 @@ async function submitScout() {
   const checklist = {};
   SCOUT_CATEGORIES.forEach(c=>{
     const p = problems[c.key] || {};
+
+    if(c.multi && c.subFirst){
+      // Pest/Disease: status is now the WORST severity among whatever
+      // was individually rated -- kept at the top level so every report/
+      // dashboard reading entry.status directly (Scout Analytics,
+      // Overview Reasons table, Scout Detail, CSV exports) keeps working
+      // unchanged. subSeverities carries the real per-item detail for
+      // anything that wants to show the full breakdown.
+      const selected = Array.isArray(p.subCat) ? p.subCat : [];
+      const sevMap = p.subSeverities || {};
+      const worst = worstSubSeverity(sevMap) || 'NIL';
+      const entry = { status: worst };
+      if(selected.length){
+        entry.subCat = selected;
+        entry.subSeverities = sevMap;
+      }
+      if(selected.includes('Other')){
+        const otherVal = (document.getElementById('other-text-'+c.key.replace(/\s+/g,'-'))||{}).value||'';
+        if(otherVal) entry.otherText = otherVal;
+      }
+      checklist[c.key] = entry;
+      return;
+    }
+
     // Untouched subFirst categories (Pest/Disease left blank = nothing
     // present) record as explicit 'NIL', same as if the user had typed
     // it -- avoids ambiguity between "not asked" and "asked, found none".
@@ -5739,7 +5882,7 @@ async function submitScout() {
     const status = c.noStatus ? null : (p.status || 'NIL');
     const entry = { status };
     const subCatPresent = Array.isArray(p.subCat) ? p.subCat.length>0 : !!p.subCat;
-    if(subCatPresent) entry.subCat = p.subCat; // array for Pest/Disease, string for Expect Yield
+    if(subCatPresent) entry.subCat = p.subCat; // string for Expect Yield
     const hasOther = Array.isArray(p.subCat) ? p.subCat.includes('Other') : p.subCat === 'Other';
     if(hasOther){
       const otherVal = (document.getElementById('other-text-'+c.key.replace(/\s+/g,'-'))||{}).value||'';
@@ -5962,6 +6105,25 @@ function renderScoutChecklistHTML(checklist){
   if(!checklist) return '';
   return SCOUT_CATEGORIES.map(c=>{
     const entry = checklist[c.key] || {};
+
+    // Pest/Disease with real per-item severity data: show each pest/
+    // disease on its own line with its own badge, instead of one shared
+    // badge for the whole category.
+    if(entry.subSeverities && Object.keys(entry.subSeverities).length){
+      const rows = Object.entries(entry.subSeverities).map(([name, sev])=>{
+        const sc = SCOUT_STATUS_COLORS[sev]||SCOUT_STATUS_COLORS['NIL'];
+        const label = name==='Other' && entry.otherText ? 'Other — '+entry.otherText : name;
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0 3px 12px">
+          <span style="font-size:10px;color:#5F5E5A">${label}</span>
+          <span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:5px;background:${sc.bg};color:${sc.col};border:1px solid ${sc.border};flex-shrink:0">${sev}</span>
+        </div>`;
+      }).join('');
+      return `<div style="padding:5px 0;border-bottom:1px solid #f1efe8">
+        <div style="font-size:11px;color:#2C2C2A;font-weight:600;margin-bottom:2px">${c.key}</div>
+        ${rows}
+      </div>`;
+    }
+
     const statusCol = entry.status ? (SCOUT_STATUS_COLORS[entry.status]||SCOUT_STATUS_COLORS['NIL']) : SCOUT_STATUS_COLORS['NIL'];
     let subText = '';
     if(entry.subCat){

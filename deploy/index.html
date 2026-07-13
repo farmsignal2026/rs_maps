@@ -3449,6 +3449,38 @@ function applyStatCardFilter(data){
 let ovReasonGroupBy='client';
 let ovScoutGroupBy='client';
 let ovFollowupGroupBy='client';
+let ovDrillClient=null; // when set, all three sections show only divisions under this client
+
+function ovDrillInto(clientName){
+  ovDrillClient = clientName;
+  ovScoutGroupBy='division'; ovReasonGroupBy='division'; ovFollowupGroupBy='division';
+  // Sync group-by button states for all three sections
+  ['ovScoutByClient','ovScoutByDivision','ovReasonByClient','ovReasonByDivision',
+   'ovFollowupByClient','ovFollowupByDivision'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(!el) return;
+    const isDiv = id.endsWith('Division');
+    el.classList.toggle('active', isDiv);
+  });
+  renderOvScoutStatusTable();
+  renderOvReasonTable();
+  renderOvFollowupBars();
+}
+
+function ovDrillClear(){
+  ovDrillClient=null;
+  ovScoutGroupBy='client'; ovReasonGroupBy='client'; ovFollowupGroupBy='client';
+  ['ovScoutByClient','ovScoutByDivision','ovReasonByClient','ovReasonByDivision',
+   'ovFollowupByClient','ovFollowupByDivision'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(!el) return;
+    const isClient = id.endsWith('Client');
+    el.classList.toggle('active', isClient);
+  });
+  renderOvScoutStatusTable();
+  renderOvReasonTable();
+  renderOvFollowupBars();
+}
 
 function renderOverview(){
   if(!allRows.length) return;
@@ -3514,7 +3546,7 @@ function renderOverview(){
 }
 
 function setOvReasonGroup(key){
-  ovReasonGroupBy=key;
+  ovReasonGroupBy=key; ovDrillClient=null;
   ['Client','Division'].forEach(k=>{
     document.getElementById('ovReasonBy'+k).classList.toggle('active', k.toLowerCase()===key);
   });
@@ -3522,7 +3554,7 @@ function setOvReasonGroup(key){
 }
 
 function setOvScoutGroup(key){
-  ovScoutGroupBy=key;
+  ovScoutGroupBy=key; ovDrillClient=null;
   ['Client','Division'].forEach(k=>{
     document.getElementById('ovScoutBy'+k).classList.toggle('active', k.toLowerCase()===key);
   });
@@ -3530,14 +3562,26 @@ function setOvScoutGroup(key){
 }
 
 function renderOvScoutStatusTable(){
-  // Every plot, not just ones with a report -- an unattended plot has no
-  // scout_reports row at all, so it has to come from the full plot
-  // roster, same as Scout Analytics does.
   const ovStatuses=['Unattended','Scouted','Overdue','Closed'];
   const ovStatusColor={'Unattended':'#dc2626','Scouted':'#86efac','Overdue':'#f07c2a','Closed':'#166534'};
+
+  // Only relevant plots: Need Attention / Serious, or already scouted
+  const streaks = computeAttentionStreaks(filteredRows);
+  const relevantPlotIDs = new Set();
+  latestPerField(allRows).forEach(r=>{
+    if(!r.plotID) return;
+    const sl = severityLabel(r, streaks);
+    const hasScout = !!(scoutByPlot[r.plotID] && scoutByPlot[r.plotID].length);
+    if(sl==='Need attention' || sl==='Need serious attention' || hasScout)
+      relevantPlotIDs.add(r.plotID);
+  });
+
   const ovPlotMeta={};
   latestPerField(allRows).forEach(r=>{
-    if(r.plotID) ovPlotMeta[r.plotID] = ovScoutGroupBy==='division' ? (r.division||'Unknown') : (r.client||'Unknown');
+    if(!r.plotID || !relevantPlotIDs.has(r.plotID)) return;
+    // When drilled into a specific client, only include divisions of that client
+    if(ovDrillClient && (r.client||'Unknown')!==ovDrillClient) return;
+    ovPlotMeta[r.plotID] = ovScoutGroupBy==='division' ? (r.division||'Unknown') : (r.client||'Unknown');
   });
 
   const ovStatusGroups={};
@@ -3551,6 +3595,12 @@ function renderOvScoutStatusTable(){
   const ovGroupNames=Object.keys(ovStatusGroups).sort((a,b)=>ovStatusGroups[b].total-ovStatusGroups[a].total);
   const ovGroupLabel = ovScoutGroupBy==='division' ? 'Division' : 'Mill/Client';
 
+  const breadcrumb = ovDrillClient
+    ? `<div style="font-size:11px;color:var(--n500);margin-bottom:8px">
+        <span onclick="ovDrillClear()" style="cursor:pointer;color:#185FA5">← All Mills</span>
+        &nbsp;›&nbsp;<b>${ovDrillClient}</b>
+       </div>` : '';
+
   const ovStatusRows = ovGroupNames.map(g=>{
     const grp=ovStatusGroups[g];
     const cells = ovStatuses.map(s=>{
@@ -3558,12 +3608,17 @@ function renderOvScoutStatusTable(){
       return `<td><span style="font-size:11px;font-weight:700;color:${ovStatusColor[s]}">${grp[s]}</span>
         <span style="font-size:10px;color:var(--n400)"> (${pct}%)</span></td>`;
     }).join('');
-    return `<tr><td style="font-weight:600">${g}</td><td style="color:var(--n500)">${grp.total}</td>${cells}</tr>`;
+    const nameCell = ovScoutGroupBy==='client'
+      ? `<td onclick="ovDrillInto('${g.replace(/'/g,"\\'")}'); return false"
+           style="cursor:pointer;color:#185FA5;font-weight:600" title="Click to see divisions in ${g}">${g} ↓</td>`
+      : `<td style="font-weight:600">${g}</td>`;
+    return `<tr>${nameCell}<td style="color:var(--n500)">${grp.total}</td>${cells}</tr>`;
   }).join('');
 
   document.getElementById('ovScoutStatusTable').innerHTML =
-    `<thead><tr><th>${ovGroupLabel}</th><th>Total Plots</th>${ovStatuses.map(s=>`<th style="color:${ovStatusColor[s]}">${s}</th>`).join('')}</tr></thead>
-     <tbody>${ovStatusRows || '<tr><td colspan="6" style="color:var(--n400);text-align:center;padding:16px">No plots in the current filter</td></tr>'}</tbody>`;
+    `<caption style="caption-side:top;text-align:left;padding-bottom:4px">${breadcrumb}</caption>
+     <thead><tr><th>${ovGroupLabel}</th><th>Relevant Plots</th>${ovStatuses.map(s=>`<th style="color:${ovStatusColor[s]}">${s}</th>`).join('')}</tr></thead>
+     <tbody>${ovStatusRows || '<tr><td colspan="6" style="color:var(--n400);text-align:center;padding:16px">No plots needing attention in the current filter</td></tr>'}</tbody>`;
 }
 
 function renderOvReasonTable(){
@@ -3614,6 +3669,8 @@ function renderOvReasonTable(){
   const groups = {};
   latestScouts.forEach(r=>{
     const info = plotInfo[r.plot_no] || {};
+    // Drill filter: only include this plot if it belongs to the clicked mill
+    if(ovDrillClient && (info.client||'Unknown')!==ovDrillClient) return;
     const gName = ovReasonGroupBy==='stage'
       ? (info.stage||'Unknown')
       : (info[groupKey]||'Unknown');
@@ -3626,47 +3683,53 @@ function renderOvReasonTable(){
     : ovReasonGroupBy==='division'?'Division'
     : ovReasonGroupBy==='type'?'Crop Type':'Crop Stage';
 
-  const sevColor = s => s==='Very Severe'?'#7f1d1d':s==='Severe'?'#dc2626':s==='Moderate'?'#d97706':'#166534';
-  const sevBg    = s => s==='Very Severe'?'#fde2e2':s==='Severe'?'#fde8e8':s==='Moderate'?'#fef9c3':'#dcfce7';
+  const breadcrumbR = ovDrillClient
+    ? `<div style="font-size:11px;color:var(--n500);margin-bottom:8px">
+        <span onclick="ovDrillClear()" style="cursor:pointer;color:#185FA5">← All Mills</span>
+        &nbsp;›&nbsp;<b>${ovDrillClient}</b>
+       </div>` : '';
+
+  const sevColor = s => s==='Very Severe'?'#7f1d1d':s==='Severe'?'#dc2626':'#dc2626';
+  const sevBg    = s => s==='Very Severe'?'#fde2e2':'#fde8e8';
 
   const rows = groupNames.map(g=>{
     const rpts = groups[g];
-    const catCells = allCats.map(cat=>{
-      // Prefer the checklist column; fall back to the old flattened
-      // stress_type array for any report that predates it (won't have
-      // per-category severity detail in that case, shown as a plain count).
-      let matching, worstLabel;
+    const total = rpts.length;
+
+    // First pass: compute all counts
+    const counts = {};
+    allCats.forEach(cat=>{
       if(cat==='Expect Yield'){
-        matching = rpts.filter(r=>r.checklist && r.checklist[cat] && r.checklist[cat].subCat==='<30');
-        worstLabel = matching.length ? '<30 t/ac' : null;
+        counts[cat] = rpts.filter(r=>r.checklist && r.checklist[cat] && r.checklist[cat].subCat==='<30').length;
       } else {
-        matching = rpts.filter(r=>{
-          if(r.checklist && r.checklist[cat]) return r.checklist[cat].status && r.checklist[cat].status!=='NIL';
-          return (r.stress_type||[]).includes(cat); // legacy fallback
-        });
-        if(matching.length){
-          const withChecklist = matching.filter(r=>r.checklist && r.checklist[cat]);
-          if(withChecklist.length){
-            const rank={'Low':1,'Moderate':2,'Severe':3,'Very Severe':4};
-            worstLabel = withChecklist.reduce((worst,r)=>{
-              const s=r.checklist[cat].status;
-              return (!worst || rank[s]>rank[worst]) ? s : worst;
-            }, null);
-          } else {
-            worstLabel = 'flagged'; // legacy row, no severity detail available
-          }
-        }
+        counts[cat] = rpts.filter(r=>
+          r.checklist && r.checklist[cat] &&
+          ['Severe','Very Severe'].includes(r.checklist[cat].status)
+        ).length;
       }
-      if(!matching || !matching.length) return '<td style="color:var(--n300)">-</td>';
-      const sev = worstLabel||'flagged';
-      return `<td><span style="font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;
-        background:${sevBg(sev)};color:${sevColor(sev)}">${matching.length} . ${sev}</span></td>`;
+    });
+    // % is each reason's share of the SUM of all reasons for this row,
+    // so the percentages across all columns add up to 100% per row.
+    // If Villupuram has 1+1+1 = 3 total flags, each shows 33%.
+    const reasonSum = Object.values(counts).reduce((a,b)=>a+b, 0);
+
+    const catCells = allCats.map(cat=>{
+      const count = counts[cat];
+      if(!count) return '<td style="color:var(--n300);text-align:center">–</td>';
+      const pct = reasonSum ? Math.round(count/reasonSum*100) : 0;
+      return `<td><span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;
+        background:#fde8e8;color:#dc2626;white-space:nowrap">${count} (${pct}%)</span></td>`;
     }).join('');
-    return `<tr><td style="font-weight:600">${g}</td><td style="color:var(--n500);font-size:11px">${rpts.length} reports</td>${catCells}</tr>`;
+    const nameCell = ovReasonGroupBy==='client'
+      ? `<td onclick="ovDrillInto('${g.replace(/'/g,"\\'")}'); return false"
+           style="cursor:pointer;color:#185FA5;font-weight:600" title="Click to see divisions in ${g}">${g} ↓</td>`
+      : `<td style="font-weight:600">${g}</td>`;
+    return `<tr>${nameCell}<td style="color:var(--n500);font-size:11px">${total} reports</td>${catCells}</tr>`;
   }).join('');
 
   document.getElementById('ovReasonTable').innerHTML =
-    `<thead><tr><th>${groupLabel}</th><th>Reports</th>${allCats.map(c=>`<th style="font-size:10px">${c}</th>`).join('')}</tr></thead>
+    `<caption style="caption-side:top;text-align:left;padding-bottom:4px">${breadcrumbR}</caption>
+     <thead><tr><th>${groupLabel}</th><th>Reports</th>${allCats.map(c=>`<th style="font-size:10px">${c}</th>`).join('')}</tr></thead>
      <tbody>${rows}</tbody>`;
 }
 
@@ -3675,7 +3738,7 @@ function renderOvReasonTable(){
 // plots doing badly matters more to overall crop health than the same
 // count of small ones, which a plain plot-count bar would hide.
 function setOvFollowupGroup(key){
-  ovFollowupGroupBy=key;
+  ovFollowupGroupBy=key; ovDrillClient=null;
   ['Client','Division'].forEach(k=>{
     document.getElementById('ovFollowupBy'+k).classList.toggle('active', k.toLowerCase()===key);
   });
@@ -3687,10 +3750,11 @@ function renderOvFollowupBars(){
   const outLabels={'Improved':'Improved','Same-Status':'Same status','Still-Worst':'Still worse'};
   const colors={'Improved':'#166534','Same-Status':'#d97706','Still-Worst':'#dc2626'};
 
-  const areaByPlot={}, groupByPlot={};
+  const areaByPlot={}, groupByPlot={}, clientByPlot={};
   latestPerField(allRows).forEach(r=>{
     if(!r.plotID) return;
     areaByPlot[r.plotID]=r.area||0;
+    clientByPlot[r.plotID]=r.client||'Unknown';
     groupByPlot[r.plotID] = ovFollowupGroupBy==='division' ? (r.division||'Unknown') : (r.client||'Unknown');
   });
 
@@ -3699,6 +3763,8 @@ function renderOvFollowupBars(){
   Object.values(followupsByReportId).forEach(fu=>{
     const status=fu.crop_status;
     if(outcomes.indexOf(status)===-1) return;
+    // Drill filter: only include this plot if it belongs to the clicked mill
+    if(ovDrillClient && (clientByPlot[fu.plot_no]||'Unknown')!==ovDrillClient) return;
     const g = groupByPlot[fu.plot_no] || 'Unknown';
     if(!groups[g]){ groups[g]={}; outcomes.forEach(o=>groups[g][o]={plots:0,area:0}); }
     groups[g][status].plots++;
@@ -3719,9 +3785,12 @@ function renderOvFollowupBars(){
 
   const groupLabel = ovFollowupGroupBy==='division' ? 'Division' : 'Mill/Client';
 
-  // Inline mini-bar per cell: number + area on top, thin bar underneath --
-  // compact enough that a table with 29 division rows stays scannable,
-  // unlike repeating a full stat-card block per group down the page.
+  const breadcrumbF = ovDrillClient
+    ? `<div style="font-size:11px;color:var(--n500);margin-bottom:8px">
+        <span onclick="ovDrillClear()" style="cursor:pointer;color:#185FA5">← All Mills</span>
+        &nbsp;›&nbsp;<b>${ovDrillClient}</b>
+       </div>` : '';
+
   const cell = (o, s, pctArea) => `
     <td>
       <div style="font-size:11px;font-weight:700;color:${colors[o]}">${s.plots} <span style="font-weight:500;color:var(--n500)">· ${s.area.toFixed(1)}ac (${pctArea}%)</span></div>
@@ -3738,11 +3807,16 @@ function renderOvFollowupBars(){
       const pctArea = totalArea? Math.round(s.area/totalArea*100):0;
       return cell(o, s, pctArea);
     }).join('');
-    return `<tr><td style="font-weight:600">${g}</td>${cells}</tr>`;
+    const nameCell = ovFollowupGroupBy==='client'
+      ? `<td onclick="ovDrillInto('${g.replace(/'/g,"\\'")}'); return false"
+           style="cursor:pointer;color:#185FA5;font-weight:600" title="Click to see divisions in ${g}">${g} ↓</td>`
+      : `<td style="font-weight:600">${g}</td>`;
+    return `<tr>${nameCell}${cells}</tr>`;
   }).join('');
 
   document.getElementById('ovFollowupTable').innerHTML =
-    `<thead><tr><th>${groupLabel}</th>${outcomes.map(o=>`<th style="color:${colors[o]}">${outLabels[o]}</th>`).join('')}</tr></thead>
+    `<caption style="caption-side:top;text-align:left;padding-bottom:4px">${breadcrumbF}</caption>
+     <thead><tr><th>${groupLabel}</th>${outcomes.map(o=>`<th style="color:${colors[o]}">${outLabels[o]}</th>`).join('')}</tr></thead>
      <tbody>${rows}</tbody>`;
 }
 
@@ -7275,6 +7349,25 @@ function openScoutDetailModal(plotID){
 
   var checklistHTML = SA_CATEGORIES.map(function(cat){
     var entry=(latest.checklist && latest.checklist[cat]) || {};
+
+    // Pest/Disease with real per-item severity data: one line per pest/
+    // disease, each with its own badge, instead of one shared badge.
+    if(entry.subSeverities && Object.keys(entry.subSeverities).length){
+      var subRows = Object.keys(entry.subSeverities).map(function(name){
+        var sev = entry.subSeverities[name];
+        var sc2 = SDM_STATUS_COLORS[sev] || SDM_STATUS_COLORS['NIL'];
+        var label = (name==='Other' && entry.otherText) ? 'Other — '+entry.otherText : name;
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0 3px 14px">'
+          +'<span style="font-size:11px;color:#5F5E5A">'+label+'</span>'
+          +'<span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:5px;background:'+sc2.bg+';color:'+sc2.col+';border:1px solid '+sc2.border+'">'+sev+'</span>'
+          +'</div>';
+      }).join('');
+      return '<div style="padding:6px 0;border-bottom:1px solid var(--n100)">'
+        +'<div style="font-size:12px;color:#2C2C2A;font-weight:600">'+cat+'</div>'
+        +subRows
+        +'</div>';
+    }
+
     var sc = SDM_STATUS_COLORS[entry.status] || SDM_STATUS_COLORS['NIL'];
     var subText='';
     if(entry.subCat){
@@ -7459,7 +7552,11 @@ function saRenderReasons(meta, plotIDs){
           // Not a severity flag -- flagged as a "reason" here only when
           // the yield estimate itself is low (<30 t/acre bucket).
           if(entry.subCat==='<30') groups[g][cat]++;
-        } else if(entry.status && entry.status!=='NIL'){
+        } else if(entry.status==='Severe' || entry.status==='Very Severe'){
+          // Only Severe/Very Severe count as a "top reason" -- Low/
+          // Moderate are watch-level, not what's driving poor crop
+          // health, and counting them the same would understate how
+          // concentrated the real problems actually are.
           groups[g][cat]++;
         }
       });
@@ -7489,7 +7586,7 @@ function saRenderReasons(meta, plotIDs){
     };
   });
   document.getElementById('saTitle').textContent='Top reasons by '+saGroupLabel();
-  document.getElementById('saSubtitle').textContent='Based on the latest scout visit per plot · Yield = flagged when estimate is under 30 t/acre · bars are NOT stacked, since one plot can be flagged for several reasons at once';
+  document.getElementById('saSubtitle').textContent='Severe/Very Severe only, latest scout visit per plot · Yield = flagged when estimate is under 30 t/acre · bars are NOT stacked, since one plot can be flagged for several reasons at once';
   saDrawChart(groupNames, datasets, saMetric==='pct'?'% of scouted plots (can exceed 100% combined -- not stacked)':'Number of plots flagged', false);
 }
 
