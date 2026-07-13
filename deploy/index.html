@@ -7565,11 +7565,11 @@ function saRenderReasons(meta, plotIDs){
     }
   });
 
-  // Sort by descending total flag count so most-flagged group is on top
+  // Ascending sort = highest flag count at top in horizontal bar chart
   var groupNames=Object.keys(groups).sort(function(a,b){
     var sumA=SA_CATEGORIES.reduce(function(s,c){return s+(groups[a][c]||0);},0);
     var sumB=SA_CATEGORIES.reduce(function(s,c){return s+(groups[b][c]||0);},0);
-    return sumB-sumA;
+    return sumA-sumB;
   });
 
   var catColors=['#1f77b4','#2ca02c','#d62728','#17becf','#9467bd','#ff7f0e','#8c564b','#7f7f7f','#e377c2'];
@@ -7581,6 +7581,15 @@ function saRenderReasons(meta, plotIDs){
         return groups[g][cat]||0;
       })
     };
+  });
+
+  // Sort datasets so the category with the most flags appears at the top
+  // of the grouped bar cluster (Chart.js draws datasets top-to-bottom in
+  // the order they're registered, so highest value goes last = renders at top).
+  datasets.sort(function(a,b){
+    var sumA=a.data.reduce(function(s,v){return s+v;},0);
+    var sumB=b.data.reduce(function(s,v){return s+v;},0);
+    return sumA-sumB; // ascending = highest renders at top
   });
   document.getElementById('saTitle').textContent='Top reasons by '+saGroupLabel();
   document.getElementById('saSubtitle').textContent='Severe/Very Severe only · latest scout visit per plot · sorted by most flags on top · Expect Yield shown in its own tab';
@@ -7606,7 +7615,7 @@ function saRenderYield(meta, plotIDs){
     groups[g].total++;
   });
 
-  var groupNames=Object.keys(groups).sort(function(a,b){return groups[b].total-groups[a].total;});
+  var groupNames=Object.keys(groups).sort(function(a,b){return groups[a].total-groups[b].total;});
   if(!groupNames.length){
     document.getElementById('saTitle').textContent='Expect Yield by '+saGroupLabel();
     document.getElementById('saSubtitle').textContent='No yield estimates recorded yet in the current filter.';
@@ -7717,7 +7726,11 @@ function saDrawChart(labels, datasets, valueTitle, stacked){
 // up first in the labels array -- which saDrawChart's horizontal bars
 // render at the top.
 function saSortGroupsByTotal(groups){
-  return Object.keys(groups).sort(function(a,b){return (groups[b].total||0)-(groups[a].total||0);});
+  // Chart.js horizontal bars render bottom-to-top, so the first item in
+  // the labels array appears at the BOTTOM of the chart. Sorting ascending
+  // (lowest first) means the highest-value group ends up at the top -- the
+  // opposite of what you'd expect from a descending sort on a vertical chart.
+  return Object.keys(groups).sort(function(a,b){return (groups[a].total||0)-(groups[b].total||0);});
 }
 
 function scoutAnalyticsExportExcel(){ exportChartExcel(scoutAnalyticsChartInst,'Scout_Analytics_'+saView); }
