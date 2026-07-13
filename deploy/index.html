@@ -2018,6 +2018,7 @@ function applySeasonDefaultsToAllPanels(){
   }
 }
 let fieldDetailsPlotIDs=[];   // full plot universe per Field Details (Tab 2), independent of NDVI matching
+let fieldDetailsMeta={};      // {plotID: {client, division, plotType, ...}} -- same data as fm in mergeAll, exposed globally for filtered coverage stats
 
 // Total Plots (Field Details universe) / Mapped (has a GeoJSON boundary) / Not Mapped
 // -- AI Insights: Tier 1 (trajectory) + Tier 2 (pattern detection) ------
@@ -2131,13 +2132,24 @@ function computeAllTrendInsights(data){
 }
 
 function getPlotCoverageStats(){
-  // Use filteredRows so Mapped Status responds to Client/Division/
-  // Crop Type filters -- previously used fieldDetailsPlotIDs which
-  // was a fixed global list, always showing the total regardless of
-  // whatever filters were active.
-  const plotIDs=[...new Set(latestPerField(filteredRows).map(r=>r.plotID).filter(Boolean))];
-  const total=plotIDs.length;
-  const mapped=plotIDs.filter(pid=>boundaryByPlotID[pid]).length;
+  // Use fieldDetailsPlotIDs (full universe from Field Details file) so
+  // unmapped plots with no NDVI data are included in the total -- they
+  // have no rows in allRows/filteredRows at all, so latestPerField() can
+  // never see them, which was causing 425 total instead of 433.
+  // Apply the active Client / Division / PlotType filters using
+  // fieldDetailsMeta so the counts change when filters change.
+  const cl  = document.getElementById('fClient')?.value || '';
+  const pt  = document.getElementById('fPlotType')?.value || '';
+  const plotIDs = fieldDetailsPlotIDs.filter(pid=>{
+    const m = fieldDetailsMeta[pid];
+    if(!m) return true; // no metadata -- include rather than silently drop
+    if(cl && m.client !== cl) return false;
+    if(selDivision.size > 0 && !selDivision.has(m.division)) return false;
+    if(pt && m.plotType !== pt) return false;
+    return true;
+  });
+  const total  = plotIDs.length;
+  const mapped = plotIDs.filter(pid=>boundaryByPlotID[pid]).length;
   return {total, mapped, notMapped:total-mapped};
 }
 let tab3On=false,tab4On=true,tab5On=true,tab6On=true;   // optional-tab include/exclude checkboxes -- tab3 (S1) off by default
@@ -2507,6 +2519,7 @@ function mergeAll(){
   // exist per company records, independent of whether it has NDVI data
   // yet (that's the separate, existing "Fields monitored" count).
   fieldDetailsPlotIDs=Object.keys(fm);
+  fieldDetailsMeta=fm; // expose globally for filtered coverage stats
   const out=[];
   rawS.forEach(row=>{
     const ks=Object.keys(row);
