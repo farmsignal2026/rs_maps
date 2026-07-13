@@ -1588,6 +1588,21 @@ body {
     </div>
 
     <div class="body">
+      <!-- Filters — Mill / Division (mirrors Fields screen filter row) -->
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <select id="scout-filter-mill" onchange="renderScoutAlerts()"
+          style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid #D3D1C7;font-size:12px;background:#fff;color:#2C2C2A;font-family:inherit">
+          <option value="">All Mills</option>
+        </select>
+        <select id="scout-filter-division" onchange="renderScoutAlerts()"
+          style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid #D3D1C7;font-size:12px;background:#fff;color:#2C2C2A;font-family:inherit">
+          <option value="">All Divisions</option>
+        </select>
+      </div>
+
+      <!-- Summary KPI cards -->
+      <div id="scout-summary-cards" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:10px"></div>
+
       <!-- Search bar -->
       <div style="position:relative;margin-bottom:10px">
         <i class="ti ti-search" style="position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:14px;color:#888780;pointer-events:none"></i>
@@ -1601,23 +1616,6 @@ body {
           <i class="ti ti-x"></i>
         </button>
       </div>
-
-      <!-- Calendar strip -->
-      <div style="background:#fff;border-radius:12px;border:1px solid #e8e4da;padding:10px 12px;margin-bottom:10px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <span style="font-size:12px;font-weight:600;color:#444441"><span id="planner-calendar-label">Scout Calendar</span> · <span id="scout-calendar-hdr">Jul 2026</span></span>
-          <span style="font-size:10px;color:#888780">15-day window</span>
-        </div>
-        <div style="display:flex;gap:4px;overflow-x:auto;padding-bottom:4px" id="scout-calendar-strip"></div>
-        <div style="display:flex;gap:10px;margin-top:6px;font-size:10px">
-          <span><span style="display:inline-block;width:7px;height:7px;background:#f07c2a;border-radius:50%;margin-right:3px"></span>Due</span>
-          <span><span style="display:inline-block;width:7px;height:7px;background:#2ea84a;border-radius:50%;margin-right:3px"></span>Scheduled</span>
-          <span style="color:#888780;margin-left:auto">Tap date to plan</span>
-        </div>
-      </div>
-
-      <!-- Summary cards -->
-      <div id="scout-summary-cards" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:10px"></div>
 
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <span style="font-size:12px;font-weight:600;color:#994800;text-transform:uppercase;letter-spacing:0.04em"><i class="ti ti-alert-triangle" style="font-size:13px" id="planner-list-icon"></i> <span id="planner-list-label">Pending Scouts</span></span>
@@ -5356,23 +5354,42 @@ function setScoutFilter(key) {
 }
 
 function renderScoutAlerts() {
-  renderCalendar();
+  // Only Attention + Serious fields need scouting (+ already-scouted ones)
+  const allRelevant = fields.filter(f => f.mapped &&
+    (f.healthStatus === 'attention' || f.healthStatus === 'serious' ||
+     (scoutByPlot[f.code] && scoutByPlot[f.code].length)));
 
-  // Only Attention + Serious fields need scouting
-  const attn = fields.filter(f => f.mapped &&
-    (f.healthStatus === 'attention' || f.healthStatus === 'serious'));
+  // Populate Mill filter
+  const millSel = document.getElementById('scout-filter-mill');
+  const divSel  = document.getElementById('scout-filter-division');
+  if(millSel && millSel.options.length <= 1){
+    const mills = [...new Set(allRelevant.map(f=>f.factory||'').filter(Boolean))].sort();
+    mills.forEach(m=>{ const o=document.createElement('option'); o.value=m; o.textContent=m; millSel.appendChild(o); });
+  }
+  const selMill = millSel ? millSel.value : '';
+  // Populate/update Division filter based on selected Mill
+  if(divSel){
+    const milledFields = selMill ? allRelevant.filter(f=>f.factory===selMill) : allRelevant;
+    const divs = [...new Set(milledFields.map(f=>f.division||'').filter(Boolean))].sort();
+    const curDiv = divSel.value;
+    divSel.innerHTML = '<option value="">All Divisions</option>'
+      + divs.map(d=>`<option value="${d}"${d===curDiv?' selected':''}>${d}</option>`).join('');
+  }
+  const selDiv = divSel ? divSel.value : '';
 
-  // Update subtitle with scope
+  // Apply filters
+  let attn = allRelevant;
+  if(selMill) attn = attn.filter(f=>f.factory===selMill);
+  if(selDiv)  attn = attn.filter(f=>f.division===selDiv);
+
+  // Update subtitle
   const sub = document.getElementById('scout-alerts-sub');
   if(sub){
-    const scope = currentUser && currentUser.factory_code
-      ? (currentUser.factoryName || currentUser.factory_code) + (currentUser.division_codes && currentUser.division_codes.length === 1
-          ? ' · ' + (currentUser.division_codes[0].split('-').slice(1).join(' ')) : '')
-      : 'All Factories';
+    const scope = selDiv || selMill || (currentUser && (currentUser.factoryName || currentUser.factory_code)) || 'All Factories';
     sub.textContent = 'Need Attention & Serious · ' + scope;
   }
 
-  // Count per status from real data
+  // Count per status from filtered set
   const counts = { unattended:0, scheduled:0, scouted:0, overdue:0, closed:0 };
   attn.forEach(f => { const st=getScoutStatus(f.code); counts[st.type]++; });
 
@@ -5416,6 +5433,8 @@ function renderScoutAlerts() {
   if(clearBtn) clearBtn.style.display = searchQ ? 'block' : 'none';
 
   let filtered = scoutFilter==='all' ? attn : attn.filter(f=>getScoutStatus(f.code).type===scoutFilter);
+  // Sort A→Z by farmer name, matching the Fields screen order
+  filtered = filtered.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||''));
   if(searchQ){
     filtered = filtered.filter(f=>
       f.name.toLowerCase().includes(searchQ) ||
