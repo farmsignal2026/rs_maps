@@ -2323,68 +2323,12 @@ function updateNetworkStatus(isOnline){
 <script>
 // ── Master plot database (simulates Supabase plots table) ─────────────────
 // Each plot has: factory, division, section, village, farmer, code, agronomics
-let ALL_FIELDS = [
-  // ═══════════════════════════════════════════════════════
-  // TRICHY DIVISION — RSCL Factory
-  // ═══════════════════════════════════════════════════════
-  // Ariyamangalam Section — dates spread across survey windows
-  {name:"Murugan R",    code:"RSCL-TRY-0042", factory:"RSCL", division:"Trichy",      section:"Ariyamangalam", village:"Kolianur",    area:"2.4", variety:"Co 86032",  type:"Plant Crop", date:"05 Apr 2026", soil:"Red Loam",    phone:"+91 98421 XXXXX", mapped:false},
-  {name:"Rajan P",      code:"RSCL-TRY-0063", factory:"RSCL", division:"Trichy",      section:"Ariyamangalam", village:"Thulasipatti",area:"3.1", variety:"Co 86032",  type:"Plant Crop", date:"22 Feb 2026", soil:"Sandy Loam",  phone:"+91 90925 XXXXX", mapped:false},
-  {name:"Annamalai S",  code:"RSCL-TRY-0071", factory:"RSCL", division:"Trichy",      section:"Ariyamangalam", village:"Kolianur",    area:"2.0", variety:"CoC 671",   type:"Ratoon 2",   date:"10 Mar 2026", soil:"Red Loam",    phone:"+91 97896 XXXXX", mapped:true,  healthStatus:"attention"},
-  {name:"Palani M",     code:"RSCL-TRY-0114", factory:"RSCL", division:"Trichy",      section:"Ariyamangalam", village:"Kolianur",    area:"2.8", variety:"Co 0238",   type:"Ratoon 1",   date:"10 Jan 2026", soil:"Red Loam",    phone:"+91 94210 XXXXX", mapped:true,  healthStatus:"optimal"},
-  {name:"Ramu S",       code:"RSCL-TRY-0127", factory:"RSCL", division:"Trichy",      section:"Ariyamangalam", village:"Thulasipatti",area:"1.9", variety:"CoC 671",   type:"Plant Crop", date:"02 Nov 2025", soil:"Sandy Loam",  phone:"+91 98761 XXXXX", mapped:true,  healthStatus:"attention"},
-  {name:"Muthu P",      code:"RSCL-TRY-0145", factory:"RSCL", division:"Trichy",      section:"Ariyamangalam", village:"Kolianur",    area:"3.0", variety:"Co 0238",   type:"Plant Crop", date:"01 Apr 2026", soil:"Alluvial",    phone:"+91 94876 XXXXX", mapped:true,  healthStatus:"attention"},
-  {name:"Arjunan D",    code:"RSCL-TRY-0172", factory:"RSCL", division:"Trichy",      section:"Ariyamangalam", village:"Kolianur",    area:"2.6", variety:"Co 0238",   type:"Ratoon 2",   date:"15 Feb 2026", soil:"Black Cotton", phone:"+91 94567 XXXXX", mapped:true,  healthStatus:"attention"},
-  // Manachanallur Section
-  {name:"Selvam K",     code:"RSCL-TRY-0058", factory:"RSCL", division:"Trichy",      section:"Manachanallur", village:"Pudur",       area:"1.8", variety:"Co 0238",   type:"Ratoon 1",   date:"10 Mar 2026", soil:"Black Cotton", phone:"+91 94432 XXXXX", mapped:false},
-  {name:"Velu M",       code:"RSCL-TRY-0085", factory:"RSCL", division:"Trichy",      section:"Manachanallur", village:"Pudur",       area:"4.2", variety:"Co 0238",   type:"Plant Crop", date:"25 Aug 2025", soil:"Alluvial",    phone:"+91 98432 XXXXX", mapped:true,  healthStatus:"good"},
-  {name:"Senthil R",    code:"RSCL-TRY-0091", factory:"RSCL", division:"Trichy",      section:"Manachanallur", village:"Thulasipatti",area:"1.5", variety:"Co 86032",  type:"Ratoon 1",   date:"05 Mar 2026", soil:"Black Cotton", phone:"+91 94421 XXXXX", mapped:true,  healthStatus:"optimal"},
-  {name:"Kannan T",     code:"RSCL-TRY-0102", factory:"RSCL", division:"Trichy",      section:"Manachanallur", village:"Pudur",       area:"3.5", variety:"Co 86032",  type:"Plant Crop", date:"18 Jan 2026", soil:"Alluvial",    phone:"+91 97432 XXXXX", mapped:true,  healthStatus:"good"},
-  {name:"Krishnan V",   code:"RSCL-TRY-0138", factory:"RSCL", division:"Trichy",      section:"Manachanallur", village:"Pudur",       area:"2.2", variety:"Co 86032",  type:"Ratoon 2",   date:"10 Sep 2025", soil:"Black Cotton", phone:"+91 90432 XXXXX", mapped:true,  healthStatus:"good"},
-  {name:"Siva R",       code:"RSCL-TRY-0157", factory:"RSCL", division:"Trichy",      section:"Manachanallur", village:"Thulasipatti",area:"1.7", variety:"CoC 671",   type:"Ratoon 1",   date:"05 Apr 2026", soil:"Red Loam",    phone:"+91 98543 XXXXX", mapped:true,  healthStatus:"good"},
-  {name:"Balamurugan K",code:"RSCL-TRY-0163", factory:"RSCL", division:"Trichy",      section:"Manachanallur", village:"Pudur",       area:"4.5", variety:"Co 86032",  type:"Plant Crop", date:"22 Jan 2026", soil:"Sandy Loam",  phone:"+91 97234 XXXXX", mapped:true,  healthStatus:"optimal"},
-
-  // ═══════════════════════════════════════════════════════
-  // PUDUKOTTAI DIVISION — RSCL Factory
-  // ═══════════════════════════════════════════════════════
-  // Alangudi Section
-  {name:"Durai A",      code:"RSCL-PDK-0012", factory:"RSCL", division:"Pudukottai",  section:"Alangudi",      village:"Alangudi",    area:"3.2", variety:"Co 86032",  type:"Plant Crop", date:"10 Jan 2025", soil:"Black Cotton", phone:"+91 98421 XXXXX", mapped:false},
-  {name:"Ganesan P",    code:"RSCL-PDK-0028", factory:"RSCL", division:"Pudukottai",  section:"Alangudi",      village:"Manamelkudi", area:"2.6", variety:"Co 0238",   type:"Ratoon 1",   date:"14 Feb 2024", soil:"Red Loam",    phone:"+91 97654 XXXXX", mapped:false},
-  {name:"Pandi R",      code:"RSCL-PDK-0045", factory:"RSCL", division:"Pudukottai",  section:"Alangudi",      village:"Alangudi",    area:"1.9", variety:"CoC 671",   type:"Plant Crop", date:"20 Mar 2025", soil:"Alluvial",    phone:"+91 94321 XXXXX", mapped:true,  healthStatus:"good"},
-  {name:"Sundar K",     code:"RSCL-PDK-0059", factory:"RSCL", division:"Pudukottai",  section:"Alangudi",      village:"Manamelkudi", area:"2.8", variety:"Co 86032",  type:"Ratoon 2",   date:"05 Nov 2023", soil:"Black Cotton", phone:"+91 98765 XXXXX", mapped:true,  healthStatus:"attention"},
-  {name:"Velraj M",     code:"RSCL-PDK-0073", factory:"RSCL", division:"Pudukottai",  section:"Alangudi",      village:"Alangudi",    area:"3.7", variety:"Co 0238",   type:"Plant Crop", date:"18 Apr 2025", soil:"Red Loam",    phone:"+91 97890 XXXXX", mapped:true,  healthStatus:"optimal"},
-  // Keeranur Section
-  {name:"Ravi T",       code:"RSCL-PDK-0088", factory:"RSCL", division:"Pudukottai",  section:"Keeranur",      village:"Keeranur",    area:"2.1", variety:"Co 86032",  type:"Ratoon 1",   date:"25 Jan 2024", soil:"Sandy Loam",  phone:"+91 90123 XXXXX", mapped:false},
-  {name:"Kumar S",      code:"RSCL-PDK-0096", factory:"RSCL", division:"Pudukottai",  section:"Keeranur",      village:"Kuruvikondai",area:"4.0", variety:"CoC 671",   type:"Plant Crop", date:"02 Feb 2025", soil:"Red Loam",    phone:"+91 94567 XXXXX", mapped:true,  healthStatus:"good"},
-  {name:"Mani R",       code:"RSCL-PDK-0107", factory:"RSCL", division:"Pudukottai",  section:"Keeranur",      village:"Keeranur",    area:"2.5", variety:"Co 0238",   type:"Ratoon 2",   date:"12 Dec 2023", soil:"Black Cotton", phone:"+91 98234 XXXXX", mapped:true,  healthStatus:"attention"},
-  {name:"Selvi A",      code:"RSCL-PDK-0118", factory:"RSCL", division:"Pudukottai",  section:"Keeranur",      village:"Kuruvikondai",area:"1.6", variety:"Co 86032",  type:"Plant Crop", date:"28 Mar 2025", soil:"Alluvial",    phone:"+91 97111 XXXXX", mapped:true,  healthStatus:"optimal"},
-
-  // ═══════════════════════════════════════════════════════
-  // ARIYALUR DIVISION — RSCL Factory
-  // ═══════════════════════════════════════════════════════
-  // Ariyalur Section
-  {name:"Thiru K",      code:"RSCL-ARL-0008", factory:"RSCL", division:"Ariyalur",    section:"Ariyalur",      village:"Sendurai",    area:"3.4", variety:"Co 86032",  type:"Plant Crop", date:"08 Feb 2025", soil:"Red Loam",    phone:"+91 98451 XXXXX", mapped:false},
-  {name:"Babu M",       code:"RSCL-ARL-0019", factory:"RSCL", division:"Ariyalur",    section:"Ariyalur",      village:"Ariyalur",    area:"2.3", variety:"Co 0238",   type:"Ratoon 1",   date:"22 Jan 2024", soil:"Black Cotton", phone:"+91 94782 XXXXX", mapped:true,  healthStatus:"good"},
-  {name:"Chitra P",     code:"RSCL-ARL-0031", factory:"RSCL", division:"Ariyalur",    section:"Ariyalur",      village:"Sendurai",    area:"1.8", variety:"CoC 671",   type:"Ratoon 2",   date:"15 Dec 2023", soil:"Sandy Loam",  phone:"+91 97345 XXXXX", mapped:true,  healthStatus:"optimal"},
-  {name:"Manikandan R", code:"RSCL-ARL-0044", factory:"RSCL", division:"Ariyalur",    section:"Ariyalur",      village:"Ariyalur",    area:"2.9", variety:"Co 86032",  type:"Plant Crop", date:"10 Apr 2025", soil:"Red Loam",    phone:"+91 98678 XXXXX", mapped:true,  healthStatus:"good"},
-  // Jayankondam Section
-  {name:"Periasamy S",  code:"RSCL-ARL-0057", factory:"RSCL", division:"Ariyalur",    section:"Jayankondam",   village:"Jayankondam", area:"4.1", variety:"Co 0238",   type:"Plant Crop", date:"14 Mar 2025", soil:"Alluvial",    phone:"+91 90876 XXXXX", mapped:false},
-  {name:"Loganathan V", code:"RSCL-ARL-0068", factory:"RSCL", division:"Ariyalur",    section:"Jayankondam",   village:"Arumbavur",   area:"2.7", variety:"CoC 671",   type:"Ratoon 1",   date:"18 Nov 2023", soil:"Black Cotton", phone:"+91 94235 XXXXX", mapped:true,  healthStatus:"attention"},
-  {name:"Saravanan K",  code:"RSCL-ARL-0079", factory:"RSCL", division:"Ariyalur",    section:"Jayankondam",   village:"Jayankondam", area:"3.3", variety:"Co 86032",  type:"Ratoon 2",   date:"25 Oct 2023", soil:"Red Loam",    phone:"+91 97562 XXXXX", mapped:true,  healthStatus:"optimal"},
-
-  // ═══════════════════════════════════════════════════════
-  // PERAMBALUR DIVISION — RSCL Factory
-  // ═══════════════════════════════════════════════════════
-  // Perambalur Section
-  {name:"Rajesh T",     code:"RSCL-PBR-0006", factory:"RSCL", division:"Perambalur",  section:"Perambalur",    village:"Perambalur",  area:"2.5", variety:"Co 86032",  type:"Plant Crop", date:"05 Mar 2025", soil:"Red Loam",    phone:"+91 98321 XXXXX", mapped:false},
-  {name:"Senthil A",    code:"RSCL-PBR-0017", factory:"RSCL", division:"Perambalur",  section:"Perambalur",    village:"Veppur",      area:"3.8", variety:"Co 0238",   type:"Ratoon 1",   date:"20 Feb 2024", soil:"Sandy Loam",  phone:"+91 94654 XXXXX", mapped:false},
-  {name:"Karthik M",    code:"RSCL-PBR-0029", factory:"RSCL", division:"Perambalur",  section:"Perambalur",    village:"Perambalur",  area:"2.2", variety:"CoC 671",   type:"Plant Crop", date:"12 Apr 2025", soil:"Black Cotton", phone:"+91 97789 XXXXX", mapped:true,  healthStatus:"attention"},
-  {name:"Dinesh R",     code:"RSCL-PBR-0041", factory:"RSCL", division:"Perambalur",  section:"Perambalur",    village:"Veppur",      area:"1.7", variety:"Co 86032",  type:"Ratoon 2",   date:"08 Nov 2023", soil:"Alluvial",    phone:"+91 98012 XXXXX", mapped:true,  healthStatus:"attention"},
-  // Veppanthattai Section
-  {name:"Priya K",      code:"RSCL-PBR-0053", factory:"RSCL", division:"Perambalur",  section:"Veppanthattai", village:"Veppanthattai",area:"3.1",variety:"Co 0238",   type:"Plant Crop", date:"25 Jan 2025", soil:"Red Loam",    phone:"+91 94123 XXXXX", mapped:false},
-  {name:"Arun S",       code:"RSCL-PBR-0064", factory:"RSCL", division:"Perambalur",  section:"Veppanthattai", village:"Kunnam",      area:"2.4", variety:"Co 86032",  type:"Ratoon 1",   date:"10 Dec 2023", soil:"Sandy Loam",  phone:"+91 97456 XXXXX", mapped:true,  healthStatus:"good"},
-  {name:"Nisha M",      code:"RSCL-PBR-0076", factory:"RSCL", division:"Perambalur",  section:"Veppanthattai", village:"Veppanthattai",area:"1.9",variety:"CoC 671",   type:"Ratoon 2",   date:"22 Oct 2023", soil:"Black Cotton", phone:"+91 98789 XXXXX", mapped:true,  healthStatus:"optimal"},
-];
+let ALL_FIELDS = [];  // Populated from Supabase on load (loadFieldDataFromSupabase) or
+                      // from the offline cache (loadFieldsFromCache) if network is down.
+                      // Previously ~37 hardcoded fake plots (names, phone numbers) as an
+                      // initial state -- removed: confirmed no deliberate demo-mode use,
+                      // and the real total-failure path already shows an explicit alert
+                      // rather than silently falling back to this data (see line ~7058).
 
 // Division master DB — total plots include all mapped + unmapped in Supabase
 const DIVISION_DB = {
@@ -4772,20 +4716,7 @@ function fmtDate(iso) {
 }
 
 // scoutDB keyed by plot CODE (stable across field array rebuilds)
-let scoutDB = {
-  'RSCL-TRY-0071': { status:'overdue',  scheduledDate:'2026-04-24', scoutDate:'2026-04-25',
-    followupDue:'2026-05-10', followupDone:false, closeStatus:null,
-    cat:'Pest', subCat:'Woolly Aphid', intensity:'Severe', recoGiven:'yes',
-    remarks:'Spray recommended. Left side severely affected.' },
-  'RSCL-TRY-0127': { status:'scouted',  scheduledDate:'2026-05-01', scoutDate:'2026-05-02',
-    followupDue:'2026-05-17', followupDone:false, closeStatus:null,
-    cat:'Disease', subCat:'Red Rot', intensity:'Moderate', recoGiven:'yes',
-    remarks:'Remove infected stalks. Monitor spread.' },
-  'RSCL-TRY-0145': { status:'scouted',  scheduledDate:'2026-05-05', scoutDate:'2026-05-06',
-    followupDue:'2026-05-21', followupDone:false, closeStatus:null,
-    cat:'Nutrition', subCat:'N Deficiency', intensity:'Low', recoGiven:'yes',
-    remarks:'Apply 25 kg Urea per acre.' },
-};
+let scoutDB = {};
 
 function getScoutStatus(code) {
   // Read from real Supabase scout_reports first
@@ -5985,7 +5916,26 @@ async function submitScout() {
     btn.innerHTML = '<i class="ti ti-loader-2" style="font-size:18px"></i> Uploading photos...';
     const photoUrls = await uploadScoutPhotos(fieldCode, reportId);
     if(photoUrls.length){
-      await _sb.from('scout_reports').update({photo_urls: photoUrls}).eq('id', reportId);
+      // BUGFIX: previously no error handling at all on this update -- if it
+      // failed (e.g. an RLS policy allowing INSERT but not UPDATE on
+      // scout_reports), photos would upload successfully to Storage but
+      // never get linked back, with zero trace of why. Confirmed real: a
+      // fully-detailed report with photo_urls stuck NULL despite the photo
+      // genuinely existing in the field-photos bucket. Now retries once,
+      // and if it still fails, tells the officer directly rather than
+      // silently losing the link -- the report itself is still saved
+      // either way, only the photo linkage is at risk.
+      let {error: photoUpdErr} = await _sb.from('scout_reports').update({photo_urls: photoUrls}).eq('id', reportId);
+      if(photoUpdErr){
+        console.error('scout_reports photo_urls update FAILED (attempt 1):', photoUpdErr);
+        ({error: photoUpdErr} = await _sb.from('scout_reports').update({photo_urls: photoUrls}).eq('id', reportId));
+        if(photoUpdErr){
+          console.error('scout_reports photo_urls update FAILED (attempt 2, giving up):', photoUpdErr);
+          alert('Report saved, but photos may not have attached correctly. Please check this report later and re-upload photos if needed.');
+        } else {
+          console.log('scout_reports photo_urls update succeeded on retry.');
+        }
+      }
     }
 
     // Update local scoutDB -- cache the full checklist and photo URLs too
@@ -9251,7 +9201,20 @@ async function submitSurvey() {
     if(btn) btn.innerHTML = '<i class="ti ti-loader-2" style="font-size:18px"></i> Uploading photos...';
     const photoUrls = await uploadSurveyPhotos(fieldCode, surveyId);
     if(photoUrls.length){
-      await _sb.from('surveys').update({photo_urls: photoUrls}).eq('id', surveyId);
+      // Same fix as submitScout()'s photo_urls update -- see that comment
+      // for the full explanation. Retries once, tells the user if it still
+      // fails rather than silently losing the photo link.
+      let {error: photoUpdErr} = await _sb.from('surveys').update({photo_urls: photoUrls}).eq('id', surveyId);
+      if(photoUpdErr){
+        console.error('surveys photo_urls update FAILED (attempt 1):', photoUpdErr);
+        ({error: photoUpdErr} = await _sb.from('surveys').update({photo_urls: photoUrls}).eq('id', surveyId));
+        if(photoUpdErr){
+          console.error('surveys photo_urls update FAILED (attempt 2, giving up):', photoUpdErr);
+          alert('Survey saved, but photos may not have attached correctly. Please check this survey later and re-upload photos if needed.');
+        } else {
+          console.log('surveys photo_urls update succeeded on retry.');
+        }
+      }
     }
 
     // Insert answered parameters (only ones we could resolve a parameter_id for)
