@@ -514,6 +514,10 @@ body {
             style="flex:1;padding:8px 4px;border-radius:8px;border:1px solid #8B4500;background:#fff8f0;color:#8B4500;font-size:12px;font-weight:600;cursor:pointer">
             🔍 Scout
           </button>
+          <button id="pv-fu-btn" onclick="showPhotoPopup('followup')"
+            style="flex:1;padding:8px 4px;border-radius:8px;border:1px solid #1D4ED8;background:#eff4ff;color:#1D4ED8;font-size:12px;font-weight:600;cursor:pointer">
+            🔁 Follow-up
+          </button>
         </div>
       </div>
 
@@ -2980,13 +2984,15 @@ async function loadPreviewPhotos(plotNo){
   const section = document.getElementById('pv-photos-section');
   const geoBtn = document.getElementById('pv-geo-btn');
   const scoutBtn = document.getElementById('pv-scout-btn');
+  const fuBtn = document.getElementById('pv-fu-btn');
   if(!section) return;
   section.style.display = 'none';
   try {
     // field_photos counts, split by source
-    const [{count:geoCount}, {count:scoutFpCount}] = await Promise.all([
+    const [{count:geoCount}, {count:scoutFpCount}, {count:fuFpCount}] = await Promise.all([
       _sb.from('field_photos').select('id',{count:'exact',head:true}).eq('plot_no', plotNo).eq('source','geotag'),
       _sb.from('field_photos').select('id',{count:'exact',head:true}).eq('plot_no', plotNo).eq('source','scout'),
+      _sb.from('field_photos').select('id',{count:'exact',head:true}).eq('plot_no', plotNo).eq('source','followup'),
     ]);
     // Scout photos can also live in scout_reports.photo_urls (the primary
     // path scout submissions actually use) -- sum those in too, since
@@ -2994,13 +3000,20 @@ async function loadPreviewPhotos(plotNo){
     const {data:sr} = await _sb.from('scout_reports').select('photo_urls').eq('plot_no', plotNo).not('photo_urls','is',null);
     const scoutSrCount = (sr||[]).reduce((sum,r)=>sum+(r.photo_urls?r.photo_urls.length:0), 0);
 
+    // Same fallback for follow-up photos, which live in
+    // scout_followups.photo_urls the same way scout uses scout_reports.
+    const {data:fu} = await _sb.from('scout_followups').select('photo_urls').eq('plot_no', plotNo).not('photo_urls','is',null);
+    const fuSrCount = (fu||[]).reduce((sum,r)=>sum+(r.photo_urls?r.photo_urls.length:0), 0);
+
     const geoTotal = geoCount||0;
     const scoutTotal = (scoutFpCount||0) + scoutSrCount;
+    const fuTotal = (fuFpCount||0) + fuSrCount;
 
     if(geoBtn) geoBtn.innerHTML = '📍 Geotag' + (geoTotal ? ' <span style="opacity:0.75">('+geoTotal+')</span>' : '');
     if(scoutBtn) scoutBtn.innerHTML = '🔍 Scout' + (scoutTotal ? ' <span style="opacity:0.75">('+scoutTotal+')</span>' : '');
+    if(fuBtn) fuBtn.innerHTML = '🔁 Follow-up' + (fuTotal ? ' <span style="opacity:0.75">('+fuTotal+')</span>' : '');
 
-    if(geoTotal || scoutTotal){
+    if(geoTotal || scoutTotal || fuTotal){
       section.style.display = 'block';
     }
   } catch(e){ console.log('loadPreviewPhotos:', e.message); }
@@ -3020,7 +3033,7 @@ async function showPhotoPopup(source){
   const tabs  = document.getElementById('photo-popup-stage-tabs');
   const f     = selectedIdx !== null ? fields[selectedIdx] : null;
   if(!f || !popup) return;
-  const srcLabel = source==='geotag' ? 'Geotag Photos' : 'Scout Photos';
+  const srcLabel = source==='geotag' ? 'Geotag Photos' : (source==='followup' ? 'Follow-up Photos' : 'Scout Photos');
   title.textContent = srcLabel;
   sub.textContent   = f.name + ' - ' + f.code;
   grid.innerHTML    = '<div style="color:#9fd8ae;font-size:12px;padding:20px;text-align:center;grid-column:1/-1">Loading...</div>';
@@ -3057,6 +3070,23 @@ async function showPhotoPopup(source){
         sr.forEach(r=>{
           const dateISO = r.visit_date || null;
           const date = r.visit_date ? new Date(r.visit_date).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}) : '';
+          (r.photo_urls||[]).forEach(url=> photos.push({url, date, dateISO}));
+        });
+      }
+    }
+
+    // Same fallback for follow-up photos -- they live in
+    // scout_followups.photo_urls the same way scout uses scout_reports.
+    if(!photos.length && source === 'followup'){
+      const {data:fu} = await _sb.from('scout_followups')
+        .select('photo_urls,followup_date')
+        .eq('plot_no', f.code)
+        .not('photo_urls', 'is', null)
+        .order('followup_date', {ascending:false});
+      if(fu && fu.length){
+        fu.forEach(r=>{
+          const dateISO = r.followup_date || null;
+          const date = r.followup_date ? new Date(r.followup_date).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}) : '';
           (r.photo_urls||[]).forEach(url=> photos.push({url, date, dateISO}));
         });
       }
@@ -3415,6 +3445,32 @@ function pointInPolygonLL(lat, lng, polygon){
     if(intersect) inside = !inside;
   }
   return inside;
+}
+
+// Shared geofence radius -- used identically for report entry (scout/
+// followup/survey) AND for each individual photo capture, so "within 25m"
+// means the same thing everywhere instead of drifting between two
+// independent implementations.
+const FENCE_M = 25;
+
+// Distance in metres from (lat,lng) to a field's boundary/centroid, using
+// the same preference order as the original scout geofence: inside the
+// polygon always passes (0), else nearest boundary vertex, else centroid.
+// Returns null only when the field has no boundary/centroid data at all --
+// callers decide how to handle that case (e.g. an unmapped field), it's a
+// data-availability question, not a GPS-availability one.
+function fieldGeofenceDist(f, lat, lng){
+  if(!f) return null;
+  const poly = f.polygon;
+  if(poly && poly.length >= 3){
+    if(pointInPolygonLL(lat, lng, poly)) return 0;
+    const nv = nearestVertexDist(lat, lng, poly);
+    if(nv) return nv.dist;
+    if(f.centroid && f.centroid[0]) return haversineM(lat, lng, f.centroid[0], f.centroid[1]);
+    return null;
+  }
+  if(f.centroid && f.centroid[0]) return haversineM(lat, lng, f.centroid[0], f.centroid[1]);
+  return null;
 }
 
 // Check if segments (p1->p2) and (p3->p4) intersect
@@ -4147,7 +4203,6 @@ function geoFencedScout(geoItem, type, stageKey, btnIdOverride){
   if(!f){ alert('Field not found.'); return; }
 
   // Geofence check -- must be within 25m of the field boundary (or inside it)
-  const FENCE_M = 25;
 
   if(!navigator.geolocation){
     alert('GPS not available. Cannot verify you are at the field.');
@@ -4184,21 +4239,10 @@ function geoFencedScout(geoItem, type, stageKey, btnIdOverride){
       // (covers officers in the middle of large fields, potentially >25m
       // from every vertex). Falls back to centroid distance if no polygon
       // was captured for this plot.
-      const poly = geoItem.polygon;
-      let dist;
-      if(poly && poly.length >= 3){
-        if(pointInPolygonLL(lat, lng, poly)){
-          dist = 0;
-        } else {
-          const nv = nearestVertexDist(lat, lng, poly);
-          dist = nv ? nv.dist : haversineM(lat, lng, geoItem.centroid[0], geoItem.centroid[1]);
-        }
-      } else {
-        dist = haversineM(lat, lng, geoItem.centroid[0], geoItem.centroid[1]);
-      }
-      console.log('GPS dist to field boundary:', dist.toFixed(1)+'m, accuracy:', acc.toFixed(1)+'m');
+      const dist = fieldGeofenceDist(geoItem, lat, lng);
+      console.log('GPS dist to field boundary:', (dist===null?'n/a':dist.toFixed(1)+'m'), 'accuracy:', acc.toFixed(1)+'m');
 
-      if(dist > FENCE_M + acc){ // account for GPS accuracy
+      if(dist !== null && dist > FENCE_M + acc){ // account for GPS accuracy
         alert('You are ' + Math.round(dist) + 'm from this field.\n\nPlease move within 25m of the field to submit a '+(type==='survey'?'survey':'scout')+' report.\n\nThis ensures data is collected from the actual field.');
         return;
       }
@@ -4207,10 +4251,13 @@ function geoFencedScout(geoItem, type, stageKey, btnIdOverride){
     },
     err => {
       if(btn){ btn.disabled=false; btn.innerHTML=origHTML; }
-      // GPS unavailable -- ask officer to confirm they are at the field
-      if(confirm('Could not get GPS location.\n\nAre you physically at the field "'+f.name+'" ('+f.code+')?\n\nTap OK only if you are at the field.')){
-        launchScoutOrSurvey(f, type, stageKey);
-      }
+      // GPS is now mandatory -- no manual "are you at the field?" bypass.
+      // A self-reported confirm() defeats the entire point of a geofence
+      // (it's exactly as trustworthy as no check at all), so a failed GPS
+      // fix now hard-blocks the report instead of asking the officer to
+      // vouch for their own location.
+      console.log('GPS error:', err.code, err.message);
+      alert('GPS location is required to submit a '+(type==='survey'?'survey':(type==='followup'?'follow-up':'scout'))+' report.\n\nPlease enable Location Services and make sure you have a clear view of the sky, then try again.');
     },
     {timeout:10000, enableHighAccuracy:true, maximumAge:15000}
   );
@@ -5583,6 +5630,29 @@ function captureScoutPhoto(idx) {
     const {lat, lng} = await gpsPromise;
     console.log('GPS result:', lat, lng);
 
+    const resetSlot = () => {
+      slot.className = 'photo-slot';
+      slot.innerHTML = '<i class="ti ti-camera" style="font-size:22px"></i><span style="font-size:10px">Photo '+(idx+1)+'*</span>';
+    };
+
+    // GPS is now mandatory for every scout photo -- a photo with no GPS
+    // fix used to be accepted anyway (just labeled "No GPS" cosmetically),
+    // which defeats the point of geotagging scout evidence. Reject and let
+    // the officer retry instead.
+    if(lat === null || lng === null){
+      alert('GPS location is required for this photo.\n\nPlease enable Location Services and make sure you have a clear view of the sky, then try again.');
+      resetSlot();
+      return;
+    }
+
+    const f = getFieldByCode(scoutState.fieldCode);
+    const dist = fieldGeofenceDist(f, lat, lng);
+    if(dist !== null && dist > FENCE_M){
+      alert('This photo was taken ' + Math.round(dist) + 'm from the field.\n\nPlease move within 25m of the field to capture this photo.');
+      resetSlot();
+      return;
+    }
+
     const now       = new Date();
     const timestamp = now.toISOString();
     const dateStr   = now.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
@@ -5602,9 +5672,7 @@ function captureScoutPhoto(idx) {
       slot.innerHTML =
         '<div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.65);padding:2px 4px">'
         +'<div style="color:#fff;font-size:8px;font-weight:600">'+dateStr+' '+timeStr+'</div>'
-        +(lat
-          ?'<div style="color:#9fd8ae;font-size:8px">'+lat+', '+lng+'</div>'
-          :'<div style="color:#fca5a5;font-size:8px">No GPS</div>')
+        +'<div style="color:#9fd8ae;font-size:8px">'+lat+', '+lng+'</div>'
         +'</div>';
     };
     reader.onerror = e => console.error('FileReader error:', e);
@@ -6376,6 +6444,27 @@ function captureFUPhoto(idx) {
     slot.innerHTML = '<i class="ti ti-loader-2" style="font-size:14px"></i><span style="font-size:9px;display:block;margin-top:2px">Waiting GPS...</span>';
     const {lat, lng} = await gpsPromise;
 
+    const resetSlot = () => {
+      slot.className = 'photo-slot';
+      slot.innerHTML = '<i class="ti ti-camera" style="font-size:22px"></i><span style="font-size:10px">Photo '+(idx+1)+'*</span>';
+    };
+
+    // Same GPS-mandatory + geofence rule as scout photos -- see
+    // captureScoutPhoto for the full reasoning.
+    if(lat === null || lng === null){
+      alert('GPS location is required for this photo.\n\nPlease enable Location Services and make sure you have a clear view of the sky, then try again.');
+      resetSlot();
+      return;
+    }
+
+    const f = getFieldByCode(fuState.fieldCode);
+    const dist = fieldGeofenceDist(f, lat, lng);
+    if(dist !== null && dist > FENCE_M){
+      alert('This photo was taken ' + Math.round(dist) + 'm from the field.\n\nPlease move within 25m of the field to capture this photo.');
+      resetSlot();
+      return;
+    }
+
     const now       = new Date();
     const timestamp = now.toISOString();
     const dateStr   = now.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
@@ -6395,9 +6484,7 @@ function captureFUPhoto(idx) {
       slot.innerHTML =
         '<div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.65);padding:2px 4px">'
         +'<div style="color:#fff;font-size:8px;font-weight:600">'+dateStr+' '+timeStr+'</div>'
-        +(lat
-          ?'<div style="color:#9fd8ae;font-size:8px">'+lat+', '+lng+'</div>'
-          :'<div style="color:#fca5a5;font-size:8px">No GPS</div>')
+        +'<div style="color:#9fd8ae;font-size:8px">'+lat+', '+lng+'</div>'
         +'</div>';
     };
     reader.onerror = e => console.error('FileReader error:', e);
