@@ -7706,11 +7706,21 @@ function saRenderReasons(meta, plotIDs){
     }
   });
 
-  // Ascending sort = highest flag count at top in horizontal bar chart
+  // Descending by whichever metric is currently displayed -- highest
+  // value first (Chart.js horizontal bars draw array index 0 at the
+  // bottom, so ascending array order = highest rendered at top).
+  // BUGFIX: previously always summed raw counts here even in % view, so
+  // the bar order could mismatch what was actually being displayed once
+  // switched to %. Now mirrors the same pct-aware calculation the
+  // dataset sort below already uses, so both axes are consistently
+  // sorted by whatever's on screen.
+  function groupSortValue(g){
+    var sum=SA_CATEGORIES.reduce(function(s,c){return s+(groups[g][c]||0);},0);
+    if(saMetric==='pct') return groups[g].total ? sum/groups[g].total*100 : 0;
+    return sum;
+  }
   var groupNames=Object.keys(groups).sort(function(a,b){
-    var sumA=SA_CATEGORIES.reduce(function(s,c){return s+(groups[a][c]||0);},0);
-    var sumB=SA_CATEGORIES.reduce(function(s,c){return s+(groups[b][c]||0);},0);
-    return sumA-sumB;
+    return groupSortValue(a)-groupSortValue(b);
   });
 
   var catColors=['#1f77b4','#2ca02c','#d62728','#17becf','#9467bd','#ff7f0e','#8c564b','#7f7f7f','#e377c2'];
