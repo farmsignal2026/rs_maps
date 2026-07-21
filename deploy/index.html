@@ -7351,7 +7351,11 @@ function renderCompare(){
     groupNames=PLOTTYPE_ORDER.filter(function(p){return rawTypeNames.includes(p);})
       .concat(rawTypeNames.filter(function(p){return !PLOTTYPE_ORDER.includes(p);}).sort());
   } else {
-    groupNames=Object.keys(groups).sort();
+    // Descending by total plot count -- most plots first, matching the
+    // same "biggest first" convention just applied to Scout Analytics'
+    // Top Reasons. Only applies here, not to stage/plotType above, since
+    // those have a meaningful fixed sequence a value-sort would break.
+    groupNames=Object.keys(groups).sort(function(a,b){return groups[b].total-groups[a].total;});
   }
   var statuses=['Good','Moderate','Need attention','Watch'];
   var colors={'Good':'#22a65a','Moderate':'#f59e0b','Need attention':'#dc2626','Watch':'#7c3aed'};
@@ -7706,21 +7710,18 @@ function saRenderReasons(meta, plotIDs){
     }
   });
 
-  // Descending by whichever metric is currently displayed -- highest
-  // value first (Chart.js horizontal bars draw array index 0 at the
-  // bottom, so ascending array order = highest rendered at top).
-  // BUGFIX: previously always summed raw counts here even in % view, so
-  // the bar order could mismatch what was actually being displayed once
-  // switched to %. Now mirrors the same pct-aware calculation the
-  // dataset sort below already uses, so both axes are consistently
-  // sorted by whatever's on screen.
-  function groupSortValue(g){
-    var sum=SA_CATEGORIES.reduce(function(s,c){return s+(groups[g][c]||0);},0);
-    if(saMetric==='pct') return groups[g].total ? sum/groups[g].total*100 : 0;
-    return sum;
-  }
+  // Descending by total flags -- highest first. Chart.js horizontal bars
+  // render array index 0 at the bottom, so ascending array order puts the
+  // highest-value group at the top.
+  // NOTE: sorts by raw count even in % view now -- once % is expressed as
+  // each category's share of that group's OWN total flags (see pctDenom
+  // below), every group's stacked bar sums to ~100% by construction, so
+  // there's no longer a meaningful "total %" to rank groups by. Raw flag
+  // count remains the only thing that actually distinguishes groups.
   var groupNames=Object.keys(groups).sort(function(a,b){
-    return groupSortValue(a)-groupSortValue(b);
+    var sumA=SA_CATEGORIES.reduce(function(s,c){return s+(groups[a][c]||0);},0);
+    var sumB=SA_CATEGORIES.reduce(function(s,c){return s+(groups[b][c]||0);},0);
+    return sumA-sumB;
   });
 
   var catColors=['#1f77b4','#2ca02c','#d62728','#17becf','#9467bd','#ff7f0e','#8c564b','#7f7f7f','#e377c2'];
@@ -7728,23 +7729,38 @@ function saRenderReasons(meta, plotIDs){
     return {
       label:cat, backgroundColor:catColors[i%catColors.length]+'cc', borderColor:catColors[i%catColors.length], borderWidth:1, borderRadius:3,
       data:groupNames.map(function(g){
-        if(saMetric==='pct') return groups[g].total? Math.round(groups[g][cat]/groups[g].total*100):0;
-        return groups[g][cat]||0;
+        if(saMetric!=='pct') return groups[g][cat]||0;
+        // BUGFIX: previously divided by groups[g].total (total SCOUTED
+        // PLOTS), which can legitimately exceed 100% once summed across
+        // categories -- a single plot can be flagged for multiple
+        // categories at once, so percentages aren't mutually exclusive
+        // shares of the plot count. Now divides by the SUM of this
+        // group's own flag counts across all categories, matching the
+        // Overview Reasons table's approach exactly -- each category's
+        // share of this group's total flags, so the stacked bar sums to
+        // (approximately, subject to per-segment rounding) 100%.
+        var pctDenom=SA_CATEGORIES.reduce(function(s,c){return s+(groups[g][c]||0);},0);
+        return pctDenom? Math.round(groups[g][cat]/pctDenom*100):0;
       })
     };
   });
 
-  // Sort datasets so the category with the most flags appears at the top
-  // of the grouped bar cluster (Chart.js draws datasets top-to-bottom in
-  // the order they're registered, so highest value goes last = renders at top).
+  // Sort datasets so the category with the most flags (across all groups
+  // shown) is stacked at the top of each bar -- Chart.js stacks datasets
+  // bottom-to-top in registration order, so highest total goes last.
+  // NOTE: this is a single GLOBAL order shared by every bar in the chart --
+  // Chart.js stacked bars can't independently reorder segments per-bar by
+  // that bar's own values, only by one consistent category order applied
+  // to all bars. So an individual bar's segments won't necessarily read
+  // smallest-to-largest bottom-to-top -- only the cross-group total does.
   datasets.sort(function(a,b){
     var sumA=a.data.reduce(function(s,v){return s+v;},0);
     var sumB=b.data.reduce(function(s,v){return s+v;},0);
-    return sumA-sumB; // ascending = highest renders at top
+    return sumA-sumB; // ascending = highest stacks on top
   });
   document.getElementById('saTitle').textContent='Top reasons by '+saGroupLabel();
   document.getElementById('saSubtitle').textContent='Moderate/Severe/Very Severe · latest scout visit per plot · sorted by most flags on top · Expect Yield shown in its own tab';
-  saDrawChart(groupNames, datasets, saMetric==='pct'?'% of scouted plots':'Number of plots flagged', false);
+  saDrawChart(groupNames, datasets, saMetric==='pct'?'% of flags in this group':'Number of plots flagged', true, false);
 }
 
 function saRenderYield(meta, plotIDs){
@@ -7828,7 +7844,7 @@ function saRenderFollowup(meta, plotIDs){
   saDrawChart(groupNames, datasets, saMetric==='pct'?'% of follow-ups':'Number of follow-ups');
 }
 
-function saDrawChart(labels, datasets, valueTitle, stacked){
+function saDrawChart(labels, datasets, valueTitle, stacked, vertical){
   if(stacked===undefined) stacked=true;
 
   // A reason/status/outcome with zero data across every group currently
@@ -7848,22 +7864,33 @@ function saDrawChart(labels, datasets, valueTitle, stacked){
 
   // Grouped bars need more vertical room per group than stacked ones do
   // (10 thin bars side-by-side vs. 1 stacked bar) -- grow the wrapper to
-  // fit rather than squeezing them illegibly thin.
+  // fit rather than squeezing them illegibly thin. Not relevant for
+  // vertical charts, which scale with width (number of groups along the
+  // x-axis) rather than height -- a fixed height matches Compare's own
+  // vertical stacked bars.
   var wrap=document.getElementById('scoutAnalyticsChartWrap');
-  if(wrap) wrap.style.height = stacked ? '420px' : Math.max(420, labels.length*70+80)+'px';
+  if(wrap) wrap.style.height = (vertical || stacked) ? '420px' : Math.max(420, labels.length*70+80)+'px';
 
   if(scoutAnalyticsChartInst){scoutAnalyticsChartInst.destroy();scoutAnalyticsChartInst=null;}
   scoutAnalyticsChartInst=new Chart(document.getElementById('scoutAnalyticsChart'),{
     type:'bar',
     data:{labels:labels, datasets:datasets},
     options:{
-      indexAxis:'y',   // horizontal bars -- first label in the array renders at the top
+      indexAxis: vertical ? 'x' : 'y',   // vertical: category axis is x (Chart.js default). horizontal: first label renders at the top.
       responsive:true, maintainAspectRatio:false,
       plugins:{
         legend:{display:true, position:'top', labels:{font:{size:10},padding:10,usePointStyle:true,pointStyleWidth:12}},
-        tooltip:{callbacks:{label:function(i){return i.dataset.label+': '+i.parsed.x+(saMetric==='pct'?'%':'');}}}
+        tooltip:{callbacks:{label:function(i){
+          var v = vertical ? i.parsed.y : i.parsed.x;
+          return i.dataset.label+': '+v+(saMetric==='pct'?'%':'');
+        }}}
       },
-      scales:{
+      scales: vertical ? {
+        x:{stacked:stacked, ticks:{font:{size:11}}, grid:{display:false}},
+        y:{stacked:stacked, beginAtZero:true,
+           title:{display:true, text:valueTitle, font:{size:11}},
+           ticks:{font:{size:10},callback:function(v){return saMetric==='pct'?v+'%':v;}}}
+      } : {
         y:{stacked:stacked, ticks:{font:{size:11}}, grid:{display:false}},
         x:{stacked:stacked, beginAtZero:true,
            title:{display:true, text:valueTitle, font:{size:11}},
