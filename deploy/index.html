@@ -694,7 +694,7 @@ td.mono{font-family:'DM Mono',monospace;font-size:11px}
         <button class="expbtn exp-summary-btn" style="width:100%;justify-content:center" onclick="exportSummaryCSV()" title="One row per plot, current crop status -- matches Field card view">2. Summary</button>
         <button class="expbtn" style="width:100%;justify-content:center;color:#92400e" onclick="exportPlantDateOutliers()" title="One row per plot -- only plots whose first observation already shows NDVI > 0.4 within 30 days of the recorded planting date">3. Watch Planting date outliers</button>
         <button class="expbtn" style="width:100%;justify-content:center;color:#166534" onclick="exportDivisionScoutStatusCSV()" title="One row per division -- plot counts from Unattended through Closed">4. Division scout status</button>
-        <button class="expbtn" style="width:100%;justify-content:center;color:#8B4500" onclick="exportScoutReasonsCSV()" title="Plot-wise, one row per flagged parameter and its severity">5. Scout reasons</button>
+        <button class="expbtn" style="width:100%;justify-content:center;color:#8B4500" onclick="exportScoutReasonsCSV()" title="Plot-wise, one row per flagged parameter and its severity (Moderate/Severe/Very Severe)">5. Scout reasons</button>
         <button class="expbtn" style="width:100%;justify-content:center;color:#185FA5" onclick="exportScoutImpactCSV()" title="Plot-wise, crop status improvement after follow-up">6. Scout impact</button>
       </div>
     </div>
@@ -919,6 +919,7 @@ td.mono{font-family:'DM Mono',monospace;font-size:11px}
               <!-- Section 4: Reasons for poor crop (REAL from scout reports checklist) -->
               <div class="sumc" style="margin-bottom:16px">
                 <h3>🔍 Reasons for Poor Crop Health</h3>
+                <p style="font-size:11px;color:var(--n500);margin:2px 0 10px">Moderate/Severe/Very Severe · latest scout visit per plot</p>
                 <div style="display:flex;gap:8px;margin:8px 0;flex-wrap:wrap">
                   <button class="cmp-grp-btn active" id="ovReasonByClient" onclick="setOvReasonGroup('client')">Mill/Client</button>
                   <button class="cmp-grp-btn" id="ovReasonByDivision" onclick="setOvReasonGroup('division')">Division</button>
@@ -1440,7 +1441,7 @@ async function sbDoLogin(){
     // Fetch officer profile + division codes
     const {data:officers} = await getSB()
       .from('farm_officers')
-      .select('id,name,role,factory_code,division_code')
+      .select('id,name,role,factory_code,division_code,client_code')
       .eq('auth_user_id', data.user.id)
       .eq('is_active', true)
       .limit(1);
@@ -1462,16 +1463,24 @@ async function sbDoLogin(){
         name:           o.name,
         role:           o.role,
         factory_code:   o.factory_code  || null,
+        client_code:    o.client_code   || null,
         division_codes: divCodes,
       };
-      console.log('Officer profile:', currentOfficer.role, currentOfficer.factory_code, currentOfficer.division_codes);
+      console.log('Officer profile:', currentOfficer.role, currentOfficer.factory_code, currentOfficer.client_code, currentOfficer.division_codes);
       // Show officer name in user bar
       document.getElementById('sbUserName').textContent = '✓ '+o.name+' ('+o.role+')';
     } else {
-      // Admin login via email -- full access
-      currentOfficer = {name:input, role:'admin', factory_code:null, division_codes:[]};
+      // Admin login via email -- full access, no single client (true
+      // super-admin -- client_code stays null/undefined on purpose).
+      currentOfficer = {name:input, role:'admin', factory_code:null, client_code:null, division_codes:[]};
       document.getElementById('sbUserName').textContent = '✓ '+input;
     }
+
+    // Show the officer's client (RSCL/MEHTA) in the top-left brand area
+    // instead of the previously hardcoded "RSCL". A true super-admin
+    // (client_code null) keeps the generic brand name.
+    const bnameEl = document.querySelector('.brand .bname');
+    if(bnameEl) bnameEl.textContent = currentOfficer.client_code || 'FarmSignal';
 
     const signInBtn = document.getElementById('sbSignInBtn');
     if(signInBtn) signInBtn.style.display='none';
@@ -1512,13 +1521,18 @@ async function loadFromSupabase(){
       sb.from('divisions').select('code,name'),
       sb.from('sections').select('code,name'),
       sb.from('villages').select('code,name'),
-      sb.from('factories').select('code,name'),
+      sb.from('factories').select('code,name,group_code'),
       sb.from('farmers').select('id,name,farmer_code'),
     ]);
     const divMap = Object.fromEntries((divRes.data||[]).map(r=>[r.code, r.name]));
     const secMap = Object.fromEntries((secRes.data||[]).map(r=>[r.code, r.name]));
     const vilMap = Object.fromEntries((vilRes.data||[]).map(r=>[r.code, r.name]));
     const facMap = Object.fromEntries((facRes.data||[]).map(r=>[r.code, r.name]));
+    // factory_code -> client code (e.g. 'MDP'->'RSCL', 'LUG'->'MEHTA').
+    // Used below to build each plot's "Field" display string with its
+    // REAL client prefix instead of a hardcoded one, and for client-level
+    // officer/manager/admin scoping.
+    const facClientMap = Object.fromEntries((facRes.data||[]).map(r=>[r.code, r.group_code || 'RSCL']));
     const farMap = Object.fromEntries((farRes.data||[]).map(r=>[r.id, r]));
 
     // Fetch plots with active season
@@ -1527,6 +1541,9 @@ async function loadFromSupabase(){
       .select('plot_no,planting_date,variety_name,crop_type,plot_type,area_acres,division_code,section_code,village_code,factory_code,farmer_id')
       .eq('plot_is_active', true);
     if(plotErr) throw plotErr;
+
+    // plot_no -> client code, for the 'Field' display strings below.
+    const plotClientMap = Object.fromEntries(plotData.map(p=>[p.plot_no, facClientMap[p.factory_code]||'RSCL']));
 
     rawF = plotData.map(p=>{
       const farmer = p.farmer_id ? farMap[p.farmer_id] : null;
@@ -1548,8 +1565,12 @@ async function loadFromSupabase(){
       };
     });
 
-    // Apply officer scope filter -- officer role sees only assigned divisions
-    if(currentOfficer && currentOfficer.role === 'officer' && currentOfficer.division_codes.length > 0){
+    // Apply officer scope filter -- narrows by whatever level of
+    // granularity the account actually has: division > factory > client.
+    // A true super-admin (role='admin', client_code=null) matches none
+    // of these branches, so rawF stays fully unfiltered for them.
+    if(currentOfficer && (currentOfficer.role === 'officer' || currentOfficer.role === 'viewer')
+       && currentOfficer.division_codes.length > 0){
       const divSet = new Set(currentOfficer.division_codes.map(c=>c.toUpperCase()));
       const factCode = (currentOfficer.factory_code||'').toUpperCase();
       rawF = rawF.filter(r=>{
@@ -1558,10 +1579,20 @@ async function loadFromSupabase(){
         return (!factCode || rFact === factCode) && divSet.has(rDiv);
       });
       console.log('Division filter applied:', currentOfficer.division_codes, '→', rawF.length, 'plots');
-    } else if(currentOfficer && currentOfficer.role === 'manager' && currentOfficer.factory_code){
+    } else if(currentOfficer && (currentOfficer.role === 'officer' || currentOfficer.role === 'viewer'
+                                  || currentOfficer.role === 'manager') && currentOfficer.factory_code){
       const factCode = currentOfficer.factory_code.toUpperCase();
       rawF = rawF.filter(r => (r['Factory Code']||'').toUpperCase() === factCode);
       console.log('Factory filter applied:', currentOfficer.factory_code, '→', rawF.length, 'plots');
+    } else if(currentOfficer && currentOfficer.client_code && !currentOfficer.factory_code
+              && (currentOfficer.role === 'admin' || currentOfficer.role === 'manager'
+                  || currentOfficer.role === 'officer' || currentOfficer.role === 'viewer')){
+      // Client-scoped account (client_code set, no single factory, no
+      // divisions) -- sees every factory within their own client, but
+      // not other clients' plots.
+      const cc = currentOfficer.client_code.toUpperCase();
+      rawF = rawF.filter(r => (plotClientMap[r['Plot No.']]||'RSCL').toUpperCase() === cc);
+      console.log('Client filter applied:', currentOfficer.client_code, '→', rawF.length, 'plots');
     }
 
     markTabLoaded('drop2','fn2','Supabase ('+rawF.length+' plots)');
@@ -1584,15 +1615,16 @@ async function loadFromSupabase(){
       from += BATCH;
     }
     rawS = allObs.map(o=>({
-      'Field':      'RSCL-'+o.plot_no,
+      'Field':      (plotClientMap[o.plot_no]||'RSCL')+'-'+o.plot_no,
       'Date':       o.obs_date,
       'Index':      o.ndvi_mean,
       'Confidence': o.obs_confidence === 'low' ? 'Low - unconfirmed' : 'Confirmed',
     }));
 
     // Filter rawS to only include plots in officer scope
-    if(currentOfficer && (currentOfficer.role === 'officer' || currentOfficer.role === 'manager')){
-      const scopedPlotNos = new Set(rawF.map(r=>'RSCL-'+r['Plot No.']));
+    if(currentOfficer && (currentOfficer.role === 'officer' || currentOfficer.role === 'manager'
+                           || (currentOfficer.role === 'admin' && currentOfficer.client_code))){
+      const scopedPlotNos = new Set(rawF.map(r=>(plotClientMap[r['Plot No.']]||'RSCL')+'-'+r['Plot No.']));
       rawS = rawS.filter(r => scopedPlotNos.has(r['Field']));
       console.log('NDVI filter applied:', rawS.length, 'observations');
     }
@@ -1632,7 +1664,7 @@ async function loadFromSupabase(){
 
       // Kept for anything elsewhere that still expects the original
       // display-only shape.
-      'Field':      'RSCL-'+o.plot_no,
+      'Field':      (plotClientMap[o.plot_no]||'RSCL')+'-'+o.plot_no,
       'Date':       o.obs_date,
       'Index':      o.ndvi_mean,
       'Confidence': o.s1_confidence || 'high',
@@ -1751,6 +1783,18 @@ async function loadFromSupabase(){
       if(!fuErr && fuData){
         fuData.forEach(r=>{
           if(r.scout_report_id) followupsByReportId[r.scout_report_id] = r;
+          // Add follow-up photos to photosByPlot from photo_urls column --
+          // same fallback pattern already used for scout_reports above,
+          // since not every follow-up photo necessarily also has a row
+          // in field_photos.
+          if(r.photo_urls && r.photo_urls.length){
+            if(!photosByPlot[r.plot_no]) photosByPlot[r.plot_no] = [];
+            r.photo_urls.forEach(url=>{
+              photosByPlot[r.plot_no].push({
+                url, source:'followup', taken_at: r.followup_date
+              });
+            });
+          }
         });
         console.log('Scout follow-ups loaded:', fuData.length);
       } else if(fuErr){
@@ -1829,7 +1873,7 @@ document.addEventListener('DOMContentLoaded',()=>{
       // Session valid -- fetch officer profile (same as sbDoLogin does)
       const {data:officers} = await getSB()
         .from('farm_officers')
-        .select('id,name,role,factory_code,division_code')
+        .select('id,name,role,factory_code,division_code,client_code')
         .eq('auth_user_id', session.user.id)
         .eq('is_active', true)
         .limit(1);
@@ -1843,10 +1887,15 @@ document.addEventListener('DOMContentLoaded',()=>{
           if(odRows && odRows.length) divCodes = odRows.map(r=>r.division_code);
           else if(o.division_code) divCodes = [o.division_code];
         }
-        currentOfficer = {name:o.name, role:o.role, factory_code:o.factory_code||null, division_codes:divCodes};
+        currentOfficer = {name:o.name, role:o.role, factory_code:o.factory_code||null, client_code:o.client_code||null, division_codes:divCodes};
       } else {
-        currentOfficer = {name:session.user.email, role:'admin', factory_code:null, division_codes:[]};
+        currentOfficer = {name:session.user.email, role:'admin', factory_code:null, client_code:null, division_codes:[]};
       }
+
+      // Same brand-area update as sbDoLogin -- shows the officer's client
+      // (RSCL/MEHTA), or the generic name for a true super-admin.
+      const bnameEl = document.querySelector('.brand .bname');
+      if(bnameEl) bnameEl.textContent = currentOfficer.client_code || 'FarmSignal';
 
       // Restore the UI state the same way sbDoLogin does
       const userBar = document.getElementById('sbUserBar');
@@ -2416,7 +2465,16 @@ function pd(v){
   }
   return null;
 }
-function xPID(fn){const m=String(fn).match(/(\d{7,})\s*$/);return m?m[1]:null;}
+// BUGFIX: previously required 7+ consecutive digits at the end of the
+// field name (/(\d{7,})\s*$/), which worked for RSCL's plot codes
+// (8000784870) by coincidence but returned null for every MEHTA field
+// (e.g. "RSCL-LZKT 250" has no such digit run) -- silently dropping
+// every MEHTA row out of mergeAll() with no error, since the null pid
+// meant fm[pid] was never found. Splitting on the last hyphen matches
+// the same convention already used correctly throughout the Python
+// pipeline (field.split('-')[-1]) and doesn't depend on the plot code's
+// format at all.
+function xPID(fn){const s=String(fn||'').trim();const i=s.lastIndexOf('-');return i>=0?s.slice(i+1).trim():(s||null);}
 function getStage(age){for(const s of stages)if(age>=s.dayMin&&age<=s.dayMax)return s;if(age>stages[stages.length-1].dayMax)return{...stages[stages.length-1],name:'Post-maturity'};return null;}
 function getWatchThreshold(){
   const el=document.getElementById('watchThreshold');
@@ -2728,7 +2786,7 @@ function mergeAll(){
 
       // Mark as S1 estimated
       const s1row={
-        fieldName: pid in fm ? (rawS.find(r=>{const m=String(r[Object.keys(r).find(k=>/field|name/i.test(k))||Object.keys(r)[0]]||'').match(/(\d{7,})\s*$/);return m&&m[1]===pid;})||{})[Object.keys(rawS[0]||{}).find(k=>/field|name/i.test(k))||''] || (row.farmer_name?row.farmer_name+'-'+pid:pid) : pid,
+        fieldName: pid in fm ? (rawS.find(r=>xPID(r[Object.keys(r).find(k=>/field|name/i.test(k))||Object.keys(r)[0]])===pid)||{})[Object.keys(rawS[0]||{}).find(k=>/field|name/i.test(k))||''] || (row.farmer_name?row.farmer_name+'-'+pid:pid) : pid,
         satDate: assessDate,
         plantDate: fi.plantDate,
         age, stage, ndvi: predNDVI,
@@ -3774,7 +3832,7 @@ function renderOvReasonTable(){
       } else {
         counts[cat] = rpts.filter(r=>
           r.checklist && r.checklist[cat] &&
-          ['Severe','Very Severe'].includes(r.checklist[cat].status)
+          ['Moderate','Severe','Very Severe'].includes(r.checklist[cat].status)
         ).length;
       }
     });
@@ -4742,9 +4800,10 @@ function renderCards(data){
               var fn  = latest.fieldName.replace(/'/g,"\\'");
               var plantDateStr = latest.plantDate ? latest.plantDate.toISOString().slice(0,10) : '';
               var allPh = photosByPlot[pid] || [];
-              // Split by source -- Survey retired, only Geotag/Scout remain
+              // Split by source
               var geoPh  = allPh.filter(function(p){return p.source==='geotag';});
               var scoutPh= allPh.filter(function(p){return p.source==='scout';});
+              var fuPh   = allPh.filter(function(p){return p.source==='followup';});
               if(!allPh.length) return '';
 
               function srcBlock(label, icon, photos, src){
@@ -4763,6 +4822,7 @@ function renderCards(data){
               return '<div style="display:flex;gap:5px;margin:6px 0 2px">'
                 +srcBlock('Geotag','📍',geoPh,'geotag')
                 +srcBlock('Scout','🔍',scoutPh,'scout')
+                +srcBlock('Follow-up','🔁',fuPh,'followup')
                 +'</div>';
             })())
           +'</div>';
@@ -6412,9 +6472,10 @@ function exportDivisionScoutStatusCSV(){
 }
 
 // 5. Scout reasons -- plot-wise, one row per flagged parameter and its
-// severity (long format, easy to pivot). Uses each plot's LATEST scout
-// visit only, and the current checklist categories -- same source Scout
-// Analytics' Top Reasons view and the Overview Reasons table use.
+// severity (Moderate/Severe/Very Severe -- same threshold as Scout
+// Analytics' Top Reasons view and the Overview Reasons table, kept
+// consistent across all three so the export always matches what the
+// dashboard is showing). Uses each plot's LATEST scout visit only.
 function exportScoutReasonsCSV(){
   const viewData=applyStatCardFilter(filteredRows);
   const plotIDs=new Set(viewData.map(r=>r.plotID));
@@ -6432,7 +6493,7 @@ function exportScoutReasonsCSV(){
     if(latest.checklist){
       SA_CATEGORIES.forEach(cat=>{
         const entry=latest.checklist[cat];
-        if(!entry || !entry.status || entry.status==='NIL') return;
+        if(!entry || !['Moderate','Severe','Very Severe'].includes(entry.status)) return;
         let param=cat;
         if(entry.subCat){
           const sub=Array.isArray(entry.subCat)?entry.subCat.join('/'):entry.subCat;
@@ -7625,7 +7686,7 @@ function saRenderReasons(meta, plotIDs){
       SA_CATEGORIES.forEach(function(cat){
         var entry=latest.checklist[cat];
         if(!entry) return;
-        if(entry.status==='Severe' || entry.status==='Very Severe') groups[g][cat]++;
+        if(entry.status==='Moderate' || entry.status==='Severe' || entry.status==='Very Severe') groups[g][cat]++;
       });
     } else if(latest.stress_type && latest.stress_type.length){
       latest.stress_type.forEach(function(t){
@@ -7661,7 +7722,7 @@ function saRenderReasons(meta, plotIDs){
     return sumA-sumB; // ascending = highest renders at top
   });
   document.getElementById('saTitle').textContent='Top reasons by '+saGroupLabel();
-  document.getElementById('saSubtitle').textContent='Severe/Very Severe only · latest scout visit per plot · sorted by most flags on top · Expect Yield shown in its own tab';
+  document.getElementById('saSubtitle').textContent='Moderate/Severe/Very Severe · latest scout visit per plot · sorted by most flags on top · Expect Yield shown in its own tab';
   saDrawChart(groupNames, datasets, saMetric==='pct'?'% of scouted plots':'Number of plots flagged', false);
 }
 
@@ -8015,7 +8076,7 @@ function renderPhotoGalleryTabs(){
 
 function renderPhotoGalleryGrid(){
   const photos = pgStageFilter==='all' ? pgAllPhotos : pgAllPhotos.filter(p=>p.stageName===pgStageFilter);
-  const srcLabel = pgSource==='geotag'?'Geotag':pgSource==='scout'?'Scout':'All';
+  const srcLabel = pgSource==='geotag'?'Geotag':pgSource==='scout'?'Scout':pgSource==='followup'?'Follow-up':'All';
   document.getElementById('photoModalHdr').textContent=srcLabel+' Photos -- '+pgFieldLabel+' -- '+photos.length+' photo'+(photos.length===1?'':'s')+(pgStageFilter!=='all'?' -- '+pgStageFilter:'');
   document.getElementById('photoModalGrid').innerHTML=photos.map(function(p){
     var date = p.taken_at ? new Date(p.taken_at).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}) : '';

@@ -245,7 +245,7 @@ body {
         <i class="ti ti-grain" style="font-size:36px;color:#C0DD97"></i>
       </div>
       <div style="font-size:20px;font-weight:700;color:#EAF3DE;letter-spacing:0.02em">Farm Signal</div>
-      <div style="font-size:12px;color:#9FE1CB;margin-top:3px">Rajshree Sugars (RSCL) · Smart Cane Monitoring Platform</div>
+      <div style="font-size:12px;color:#9FE1CB;margin-top:3px">Smart Cane Monitoring Platform</div>
     </div>
 
     <!-- Login card -->
@@ -2349,12 +2349,25 @@ function getScopedFields() {
   if(!currentUser) return [];
   const u = currentUser;
 
-  // Admin sees everything
-  if(u.role === 'admin') return ALL_FIELDS;
+  if(u.role === 'admin'){
+    // True super-admin -- no client assigned at all -- sees every
+    // client's plots. This is the ONLY case that should see everything
+    // unconditionally; every other admin is scoped to their own client.
+    if(!u.clientCode) return ALL_FIELDS;
+    // Client-scoped admin (e.g. client_code='RSCL', factory_code=NULL) --
+    // sees every factory within their own client, but not other clients'.
+    return ALL_FIELDS.filter(f => (f.clientCode||'') === u.clientCode);
+  }
 
   // Manager — factory-wide unless specific divisions are assigned
   if(u.role === 'manager'){
-    if(!u.factory_code) return ALL_FIELDS;
+    if(!u.factory_code){
+      // No single factory -- fall back to client-level scoping, same
+      // relationship as the admin case above. A manager with neither
+      // factory_code nor clientCode set is the only case that falls
+      // through to everything, unfiltered.
+      return u.clientCode ? ALL_FIELDS.filter(f => (f.clientCode||'') === u.clientCode) : ALL_FIELDS;
+    }
     let scoped = ALL_FIELDS.filter(f => f.factoryCode === u.factory_code);
     // If manager has specific divisions assigned, filter to those divisions
     const divCodes = u.division_codes || [];
@@ -2369,9 +2382,12 @@ function getScopedFields() {
   if(u.role === 'officer' || u.role === 'viewer'){
     let scoped = ALL_FIELDS;
 
-    // Filter by factory
+    // Filter by factory, falling back to client-level scoping when no
+    // single factory is assigned (same reasoning as manager, above).
     if(u.factory_code){
       scoped = scoped.filter(f => f.factoryCode === u.factory_code);
+    } else if(u.clientCode){
+      scoped = scoped.filter(f => (f.clientCode||'') === u.clientCode);
     }
 
     // Filter by division_codes array (exact code match against f.divisionCode)
@@ -3834,8 +3850,9 @@ document.addEventListener('DOMContentLoaded', ()=>{
         const cached = await cacheGet('app_state','currentUser');
         if(cached && cached.officerId){
           currentUser = cached;
-          // Re-derive factory name display (in case it changed)
-          const titleText = 'FarmSignal' + (currentUser.factoryName ? ' — '+currentUser.factoryName : '');
+          // Re-derive factory + client display (in case either changed)
+          const titleText = (currentUser.clientCode ? currentUser.clientCode + ' · ' : '')
+                             + 'FarmSignal' + (currentUser.factoryName ? ' — '+currentUser.factoryName : '');
           ['app-title-fields','app-title-home'].forEach(id=>{
             const el=document.getElementById(id);
             if(el) el.textContent=titleText;
@@ -4851,7 +4868,15 @@ const SCOUT_CATEGORIES = [
 ];
 const SCOUT_STATUS_LEVELS = ['NIL','Low','Moderate','Severe','Very Severe'];
 const SCOUT_STATUS_COLORS = {
-  'NIL':         {bg:'#F1EFE8', col:'#5F5E5A', border:'#D3D1C7'},
+  // BUGFIX: NIL's selected color was previously identical to the
+  // unselected default (#F1EFE8/#5F5E5A/#D3D1C7) -- tapping NIL produced
+  // zero visible change (only a 0.5px border-width difference), so
+  // officers had no way to tell whether their tap registered. Now uses a
+  // distinct dark green -- reusing the same palette already used
+  // elsewhere in this file for Expect Yield's '>50' bucket -- deliberately
+  // darker/more muted than 'Low' below so NIL ("confirmed nothing
+  // present") doesn't visually read as "confirmed low severity".
+  'NIL':         {bg:'#bdead0', col:'#0f4d2e', border:'#166534'},
   'Low':         {bg:'#d4f4dc', col:'#1a7a2e', border:'#2ea84a'},
   'Moderate':    {bg:'#FFF8DC', col:'#a07800', border:'#f0c030'},
   'Severe':      {bg:'#fde8d0', col:'#994800', border:'#f07c2a'},
@@ -6772,13 +6797,17 @@ async function loadFieldDataFromSupabase(){
       _sb.from('divisions').select('code,name'),
       _sb.from('sections').select('code,name'),
       _sb.from('villages').select('code,name'),
-      _sb.from('factories').select('code,name'),
+      _sb.from('factories').select('code,name,group_code'),
       _sb.from('farmers').select('id,name,farmer_code,phone'),
     ]);
     const divMap = Object.fromEntries((divRes.data||[]).map(r=>[r.code, r.name]));
     const secMap = Object.fromEntries((secRes.data||[]).map(r=>[r.code, r.name]));
     const vilMap = Object.fromEntries((vilRes.data||[]).map(r=>[r.code, r.name]));
     const facMap = Object.fromEntries((facRes.data||[]).map(r=>[r.code, r.name]));
+    // Factory -> client (e.g. 'MDP' -> 'RSCL', 'LUG' -> 'MEHTA') -- used
+    // to scope client-level admins/managers (client_code set, no single
+    // factory_code) to their own client's plots only.
+    const facClientMap = Object.fromEntries((facRes.data||[]).map(r=>[r.code, r.group_code || null]));
     const farMap = Object.fromEntries((farRes.data||[]).map(r=>[r.id, r]));
 
     // Fetch active plots
@@ -6875,6 +6904,7 @@ async function loadFieldDataFromSupabase(){
         code:          pid,
         factory:       facMap[p.factory_code] || p.factory_code || '',
         factoryCode:   p.factory_code || '',
+        clientCode:    facClientMap[p.factory_code] || null,
         division:      divMap[p.division_code] || p.division_code || '',
         divisionCode:  p.division_code || '',
         section:       secMap[p.section_code]  || p.section_code  || '',
@@ -7475,7 +7505,7 @@ async function doLogin() {
     // Fetch officer profile (include id for officer_divisions lookup)
     const { data: officers, error: offErr } = await _sb
       .from('farm_officers')
-      .select('id,name,role,factory_code,division_code,phone')
+      .select('id,name,role,factory_code,division_code,client_code,phone')
       .eq('auth_user_id', authData.user.id)
       .eq('is_active', true)
       .limit(1);
@@ -7504,13 +7534,20 @@ async function doLogin() {
 
     // Look up the officer's factory display name (e.g. "Mundiyampakkam"),
     // not just its short code -- used to drive every on-screen header
-    // post-login instead of a hardcoded client/group name. RSCL is the
-    // client/group, which can own several factories -- what the officer
-    // should see after login is their own factory, not the group name.
+    // post-login. Also resolve the officer's client (RSCL/MEHTA) for the
+    // same header -- prefer the officer's own client_code column
+    // directly (works even when factory_code is null, e.g. a client-wide
+    // admin/manager with no single factory), falling back to deriving it
+    // via factories.group_code only for older rows where client_code was
+    // never backfilled.
     let factoryName = null;
+    let clientCode = officer.client_code || null;
     if(officer.factory_code){
-      const {data:facRow} = await _sb.from('factories').select('name').eq('code', officer.factory_code).limit(1);
-      if(facRow && facRow.length) factoryName = facRow[0].name;
+      const {data:facRow} = await _sb.from('factories').select('name,group_code').eq('code', officer.factory_code).limit(1);
+      if(facRow && facRow.length){
+        factoryName = facRow[0].name;
+        if(!clientCode) clientCode = facRow[0].group_code || null;
+      }
     }
 
     const access  = roleToAccess(officer.role, officer.factory_code);
@@ -7530,6 +7567,7 @@ async function doLogin() {
                         : 'All Factories',
       factory_code:   officer.factory_code  || null,
       factoryName:    factoryName,
+      clientCode:     clientCode,
       division_code:  officer.division_code || null,
       division_codes: divisionCodes,   // array for multi-division filtering
       avatar:         'ti-user',
@@ -7540,10 +7578,11 @@ async function doLogin() {
       canEdit:   ['admin','manager','officer'].includes(officer.role),
     };
 
-    // Drive every screen header from the officer's own factory name --
-    // never the client/group name (RSCL owns 3 factories; an officer
-    // logging in should see which factory they're in, not the group).
-    const titleText = 'FarmSignal' + (currentUser.factoryName ? ' — ' + currentUser.factoryName : '');
+    // Show the officer's client (RSCL/MEHTA) alongside their factory in
+    // every screen header. A true super-admin (clientCode null) keeps
+    // the client-neutral "FarmSignal" title.
+    const titleText = (currentUser.clientCode ? currentUser.clientCode + ' · ' : '')
+                       + 'FarmSignal' + (currentUser.factoryName ? ' — ' + currentUser.factoryName : '');
     const titleFields = document.getElementById('app-title-fields');
     const titleHome   = document.getElementById('app-title-home');
     if(titleFields) titleFields.textContent = titleText;
