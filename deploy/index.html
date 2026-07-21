@@ -6495,10 +6495,21 @@ function exportScoutReasonsCSV(){
         const entry=latest.checklist[cat];
         if(!entry || !['Moderate','Severe','Very Severe'].includes(entry.status)) return;
         let param=cat;
-        if(entry.subCat){
-          const sub=Array.isArray(entry.subCat)?entry.subCat.join('/'):entry.subCat;
-          param+=' ('+sub+')';
+        // Build the bracket detail the same way for every category: named
+        // sub-categories (Pest/Disease) show as-is; wherever the officer
+        // picked "Other" (including the standalone Others category, which
+        // has no named sub-categories at all), substitute the literal
+        // "Other" placeholder with what they actually typed in
+        // entry.otherText -- e.g. "Disease (Other)" becomes
+        // "Disease (unusual leaf spotting)", and a bare "Others" with no
+        // sub-list at all becomes "Others (broken irrigation pipe)".
+        let subParts = entry.subCat ? (Array.isArray(entry.subCat)?entry.subCat.slice():[entry.subCat]) : [];
+        if(entry.otherText){
+          subParts = subParts.length
+            ? subParts.map(s=>s==='Other'?entry.otherText:s)
+            : [entry.otherText];
         }
+        if(subParts.length) param+=' ('+subParts.join('/')+')';
         rows.push([plotID, m.farmer, m.client, m.division, m.village, latest.visit_date||'', param, entry.status]);
       });
     } else if(latest.stress_type && latest.stress_type.length){
