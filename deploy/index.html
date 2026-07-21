@@ -1515,6 +1515,15 @@ async function loadFromSupabase(){
   try {
     showSbStatus('Loading field details...');
 
+    // BUGFIX: these are pushed into incrementally (photosByPlot[x].push(...),
+    // scoutByPlot[x].push(...), etc.), not reassigned wholesale like rawF/rawS
+    // are -- so without clearing them first, any repeat call to this function
+    // within the same page session (a refresh action, retry, re-auth without
+    // a full page reload) stacks a second full copy on top of the first.
+    // Confirmed real: exactly double-counted scout reports (37 actual rows
+    // showing as 74) traced to this exact gap.
+    pngMap = {}; photosByPlot = {}; scoutByPlot = {}; followupsByReportId = {};
+
     // -- Tab 2: Field details (plots + active plot_seasons) -------------
     // Fetch hierarchy name lookups + farmers
     const [divRes, secRes, vilRes, facRes, farRes] = await Promise.all([
@@ -7724,10 +7733,21 @@ function saRenderReasons(meta, plotIDs){
     return sumA-sumB;
   });
 
-  var catColors=['#1f77b4','#2ca02c','#d62728','#17becf','#9467bd','#ff7f0e','#8c564b','#7f7f7f','#e377c2'];
-  var datasets=SA_CATEGORIES.map(function(cat,i){
+  // Fixed legend/stack order, left to right as specified -- no longer
+  // re-sorted by magnitude (that previously reordered the legend itself,
+  // since Chart.js ties legend order directly to dataset registration
+  // order, which is why "sort by biggest" and "fixed legend order" can't
+  // both be true at once. This order also becomes the stacking order.
+  var CAT_ORDER=['Population Gap','Weed','Irrigation Deficit','Waterlogging',
+    'Nutrient Deficit','Pest','Disease','Soil Problem','Others'];
+  var catColorMap={
+    'Population Gap':'#0C6904', 'Weed':'#6FC767', 'Irrigation Deficit':'#3D6CE3',
+    'Waterlogging':'#26206E', 'Nutrient Deficit':'#E8C93F', 'Pest':'#E8604F',
+    'Disease':'#DE9D95', 'Soil Problem':'#997B46', 'Others':'#C293BA',
+  };
+  var datasets=CAT_ORDER.map(function(cat){
     return {
-      label:cat, backgroundColor:catColors[i%catColors.length]+'cc', borderColor:catColors[i%catColors.length], borderWidth:1, borderRadius:3,
+      label:cat, backgroundColor:catColorMap[cat]+'cc', borderColor:catColorMap[cat], borderWidth:1, borderRadius:3,
       data:groupNames.map(function(g){
         if(saMetric!=='pct') return groups[g][cat]||0;
         // BUGFIX: previously divided by groups[g].total (total SCOUTED
@@ -7745,19 +7765,6 @@ function saRenderReasons(meta, plotIDs){
     };
   });
 
-  // Sort datasets so the category with the most flags (across all groups
-  // shown) is stacked at the top of each bar -- Chart.js stacks datasets
-  // bottom-to-top in registration order, so highest total goes last.
-  // NOTE: this is a single GLOBAL order shared by every bar in the chart --
-  // Chart.js stacked bars can't independently reorder segments per-bar by
-  // that bar's own values, only by one consistent category order applied
-  // to all bars. So an individual bar's segments won't necessarily read
-  // smallest-to-largest bottom-to-top -- only the cross-group total does.
-  datasets.sort(function(a,b){
-    var sumA=a.data.reduce(function(s,v){return s+v;},0);
-    var sumB=b.data.reduce(function(s,v){return s+v;},0);
-    return sumA-sumB; // ascending = highest stacks on top
-  });
   document.getElementById('saTitle').textContent='Top reasons by '+saGroupLabel();
   document.getElementById('saSubtitle').textContent='Moderate/Severe/Very Severe · latest scout visit per plot · sorted by most flags on top · Expect Yield shown in its own tab';
   saDrawChart(groupNames, datasets, saMetric==='pct'?'% of flags in this group':'Number of plots flagged', true, false);
