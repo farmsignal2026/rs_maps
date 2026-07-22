@@ -4137,7 +4137,7 @@ function showFieldDetailPanel(geoItem){
   const dpScout = document.getElementById('dp-scout-btn');
   if(dpScout) {
     dpScout.style.display = 'flex';
-    const isRequired = geoItem.healthStatus === 'attention' || geoItem.healthStatus === 'serious';
+    const isRequired = geoItem.needsScout;
     dpScout.innerHTML = isRequired
       ? '<i class="ti ti-binoculars" style="font-size:16px"></i> Scout (Required)'
       : '<i class="ti ti-binoculars" style="font-size:16px"></i> Scout (Optional)';
@@ -4618,7 +4618,7 @@ function openMapView(onReady) {
                          // the map, whether via the general map icon or
                          // a fresh per-field zoom request
   const mappedCount = fields.filter(f=>f.mapped).length;
-  const attentionCount = fields.filter(f=>f.mapped && (f.healthStatus==='attention'||f.healthStatus==='serious')).length;
+  const attentionCount = fields.filter(f=>f.mapped && f.needsScout).length;
   document.getElementById('map-field-count').textContent = mappedCount;
 
   // Scope label -- reflects the logged-in officer's actual factory/division,
@@ -5759,8 +5759,35 @@ async function submitScout() {
   const { photos, recoGiven, fieldCode } = scoutState;
   const problems = scoutState.problems || {};
 
+  // Disable the button IMMEDIATELY, before any validation -- previously
+  // this happened partway through the function (after the photo/checklist
+  // checks below), leaving a real window where a fast double-tap could
+  // pass validation twice before the first tap's disable took effect.
+  const btn = document.getElementById('scout-submit-btn');
+  if(btn && btn.disabled) return;   // already submitting -- ignore a second tap outright
+  if(btn){
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ti ti-loader-2" style="font-size:18px"></i> Saving...';
+  }
+  const reEnable = () => { if(btn){ btn.disabled=false; btn.innerHTML='<i class="ti ti-binoculars" style="font-size:18px"></i> Submit Scout Report'; } };
+
+  // One scout report per plot per day. Checks the full scoutByPlot data
+  // (loaded from Supabase for every officer, not just this session), so
+  // this catches a genuine duplicate regardless of which device/officer
+  // submitted the first one -- not just a same-session rapid re-tap.
+  const today = new Date().toISOString().slice(0,10);
+  const existingToday = (scoutByPlot[fieldCode]||[]).find(r => r.visit_date === today);
+  if(existingToday){
+    reEnable();
+    alert('A scout report for this field was already submitted today ('+today+').\n\n'
+          +'Only one scout report per plot per day is allowed. If you need to add more detail, '
+          +'edit or follow up on the existing report instead of submitting a new one.');
+    return;
+  }
+
   // Validate mandatory 3 photos
   if(!photos[0]||!photos[1]||!photos[2]){
+    reEnable();
     alert('Please capture all 3 photos before submitting.'); return;
   }
 
@@ -5799,6 +5826,7 @@ async function submitScout() {
     .filter(c => !(problems[c.key] && problems[c.key].status))
     .map(c => c.key);
   if(missingStatus.length){
+    reEnable();
     alert('Please set a status for: ' + missingStatus.join(', '));
     return;
   }
@@ -5816,6 +5844,7 @@ async function submitScout() {
       return selected.filter(s => !sevMap[s]).map(s => c.key+': '+s);
     });
   if(missingSubSeverity.length){
+    reEnable();
     alert('Please rate severity for: ' + missingSubSeverity.join(', '));
     return;
   }
@@ -5831,6 +5860,7 @@ async function submitScout() {
     .filter(c => !hasSubCat(c))
     .map(c => c.key);
   if(missingSubCat.length){
+    reEnable();
     alert('Please specify a sub-category for: ' + missingSubCat.join(', '));
     return;
   }
@@ -5849,17 +5879,13 @@ async function submitScout() {
     .filter(c => !((document.getElementById('other-text-'+c.key.replace(/\s+/g,'-'))||{}).value||'').trim())
     .map(c => c.key);
   if(missingOtherText.length){
+    reEnable();
     alert('Please specify details for "Other" under: ' + missingOtherText.join(', '));
     return;
   }
 
-  if(!recoGiven){ alert('Did you give a recommendation to the farmer?'); return; }
+  if(!recoGiven){ reEnable(); alert('Did you give a recommendation to the farmer?'); return; }
 
-  const btn = document.getElementById('scout-submit-btn');
-  btn.disabled = true;
-  btn.innerHTML = '<i class="ti ti-loader-2" style="font-size:18px"></i> Saving...';
-
-  const today      = new Date().toISOString().slice(0,10);
   const followupDue = addDays(today, 15);
   const remarks    = document.getElementById('scout-remarks') ? document.getElementById('scout-remarks').value||'' : '';
 
@@ -6999,6 +7025,28 @@ async function loadFieldDataFromSupabase(){
             geoEntry.healthStatus = status;
             geoEntry.lastFetch    = latestConf.date.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
             field.healthStatus    = status;
+
+            // "Needs scout" is a SEPARATE question from "what's the current
+            // health status" -- once a plot has been scouted, it stays off
+            // the actionable list for its full follow-up grace period
+            // (~15 days, per follow_up_date), regardless of what newer NDVI
+            // imagery shows in that window. This matches the SAME rule
+            // getScoutStatus() and the division-summary rollup already use
+            // correctly elsewhere -- an earlier version of this flag instead
+            // compared visit date against the specific image date driving
+            // the status, which would have re-flagged a plot the moment any
+            // newer concerning image arrived mid-follow-up-window, before
+            // the officer's own 15-day cycle was even due. scoutByPlot is
+            // sorted desc by visit_date (see the bulk load above), so [0]
+            // is always the most recent visit, from ANY officer -- not just
+            // the current session's local scoutDB cache.
+            const plotScouts = scoutByPlot[pid] || [];
+            const lastVisit  = plotScouts.length ? plotScouts[0] : null;
+            const today      = new Date().toISOString().slice(0,10);
+            const withinGracePeriod = lastVisit && lastVisit.follow_up_required
+              && lastVisit.follow_up_date && lastVisit.follow_up_date >= today;
+            geoEntry.needsScout = (status==='attention' || status==='serious') && !withinGracePeriod;
+            field.needsScout    = geoEntry.needsScout;
           }
 
           // PNG raster should reflect the actual latest available image,
