@@ -3666,6 +3666,10 @@ function renderOverview(){
   const scopedPlotCodes = new Set(latest.map(d=>d.plotID));
   const allScouts = Object.values(scoutByPlot).flat().filter(r => scopedPlotCodes.has(r.plot_no));
   const scoutedPlots = Object.keys(scoutByPlot).filter(p => scopedPlotCodes.has(p));
+  console.log('[DEBUG scout scoping]', 'fClient=', document.getElementById('fClient').value,
+              'latest.length=', latest.length, 'scopedPlotCodes.size=', scopedPlotCodes.size,
+              'total scoutByPlot entries=', Object.keys(scoutByPlot).length,
+              'allScouts (scoped)=', allScouts.length, 'scoutedPlots (scoped)=', scoutedPlots.length);
   const needAttnTotal = attn + serious;
 
   // Follow-up overdue = follow_up_date < today and not done
