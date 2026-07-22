@@ -3656,8 +3656,16 @@ function renderOverview(){
 
   // -- Section 3: Scout & Follow-up Tracking (REAL from Supabase scout_reports) --
   const today = new Date().toISOString().slice(0,10);
-  const allScouts = Object.values(scoutByPlot).flat();
-  const scoutedPlots = Object.keys(scoutByPlot);
+  // BUGFIX: previously read Object.values(scoutByPlot).flat() directly --
+  // the RAW, GLOBAL scout data, completely ignoring whatever Mill/Client/
+  // Division filter is currently active. That's why this section stayed
+  // frozen on the all-clients total while Crop Health above it (built from
+  // filteredRows/latest) correctly responded to the same filter. Scoped to
+  // the same plot set 'latest' already represents, so both sections now
+  // reflect the same active filter consistently.
+  const scopedPlotCodes = new Set(latest.map(d=>d.plotID));
+  const allScouts = Object.values(scoutByPlot).flat().filter(r => scopedPlotCodes.has(r.plot_no));
+  const scoutedPlots = Object.keys(scoutByPlot).filter(p => scopedPlotCodes.has(p));
   const needAttnTotal = attn + serious;
 
   // Follow-up overdue = follow_up_date < today and not done
