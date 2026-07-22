@@ -4857,10 +4857,10 @@ function renderCalendar() {
 const SCOUT_CATEGORIES = [
   {key:'Population Gap',     sub:null},
   {key:'Weed',               sub:null},
-  {key:'Nutrient Deficit',   sub:null},
+  {key:'Nutrient Deficit',   sub:['NPK','MN'], multi:true, alwaysSub:true, subFirst:true},
   {key:'Irrigation Deficit', sub:null},
   {key:'Waterlogging',       sub:null},
-  {key:'Pest',               sub:['ESB','INB','White Grub','Mealy Bug','Other'], multi:true, alwaysSub:true, subFirst:true},
+  {key:'Pest',               sub:['ESB','INB','White Grub','Mealy Bug','Whitefly','Other'], multi:true, alwaysSub:true, subFirst:true},
   {key:'Disease',            sub:['Sett Rot','Red Rot','Pokkah Boeng','Grassy Shoot','Yellow Leaf','Other'], multi:true, alwaysSub:true, subFirst:true},
   {key:'Soil Problem',       sub:null},
   {key:'Expect Yield',       sub:['Early to Estimate','<30','30-40','40-50','>50'], alwaysSub:true, noStatus:true},
@@ -5976,6 +5976,39 @@ async function submitScout() {
 
   try {
     // Get plot_id and officer_id
+    // BUGFIX: previously created the scout_reports row FIRST, then uploaded
+    // photos, then linked photo_urls back with a separate UPDATE. Any
+    // interruption during the (sequential, one-at-a-time) photo upload --
+    // most commonly a dropped field connection -- left a REAL scout_reports
+    // row behind with 1-2 of 3 photos and photo_urls=None, permanently
+    // orphaned unless someone noticed and manually cleaned it up. Confirmed
+    // real: 3 separate plots each showed exactly this pattern -- an
+    // incomplete row, followed minutes later by the officer's own
+    // successful retry creating a second, complete row for the same visit.
+    // Now uploads first and only creates the row once all 3 photos are
+    // confirmed uploaded -- an interruption now fails cleanly with ZERO
+    // rows created, so there's nothing orphaned to ever need cleaning up.
+    const preGeneratedId = (crypto && crypto.randomUUID) ? crypto.randomUUID() : (
+      // Fallback for browsers without crypto.randomUUID (very old/rare) --
+      // must still produce a real ID here, or photos upload under one path
+      // while the eventual insert generates a DIFFERENT id, recreating the
+      // exact same "unlinked orphaned photo" bug this whole change fixes.
+      'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random()*16|0;
+        return (c==='x' ? r : (r&0x3|0x8)).toString(16);
+      })
+    );
+
+    btn.innerHTML = '<i class="ti ti-loader-2" style="font-size:18px"></i> Uploading photos...';
+    const photoUrls = await uploadScoutPhotos(fieldCode, preGeneratedId);
+    if(photoUrls.length < 3){
+      btn.disabled = false;
+      btn.innerHTML = '<i class="ti ti-binoculars" style="font-size:18px"></i> Submit Scout Report';
+      alert('Only '+photoUrls.length+' of 3 photos uploaded successfully -- likely a connection issue.\n\n'
+            +'No report was saved. Please check your connection and try submitting again.');
+      return;
+    }
+
     const {data:plotRow} = await _sb.from('plots').select('id').eq('plot_no', fieldCode).limit(1);
     const {data:authData} = await _sb.auth.getUser();
     const {data:offRow}   = await _sb.from('farm_officers').select('id')
@@ -5998,38 +6031,14 @@ async function submitScout() {
       follow_up_date:      followupDue,
       is_draft:            false,
       synced_at:           new Date().toISOString(),
+      photo_urls:          photoUrls,   // already fully uploaded above, included directly -- no separate follow-up UPDATE needed
     };
+    if(preGeneratedId) reportRow.id = preGeneratedId;
 
     const {data:inserted, error:insertErr} = await _sb.from('scout_reports').insert(reportRow).select('id');
     if(insertErr) throw insertErr;
 
     const reportId = inserted[0].id;
-
-    // Upload photos and update photo_urls
-    btn.innerHTML = '<i class="ti ti-loader-2" style="font-size:18px"></i> Uploading photos...';
-    const photoUrls = await uploadScoutPhotos(fieldCode, reportId);
-    if(photoUrls.length){
-      // BUGFIX: previously no error handling at all on this update -- if it
-      // failed (e.g. an RLS policy allowing INSERT but not UPDATE on
-      // scout_reports), photos would upload successfully to Storage but
-      // never get linked back, with zero trace of why. Confirmed real: a
-      // fully-detailed report with photo_urls stuck NULL despite the photo
-      // genuinely existing in the field-photos bucket. Now retries once,
-      // and if it still fails, tells the officer directly rather than
-      // silently losing the link -- the report itself is still saved
-      // either way, only the photo linkage is at risk.
-      let {error: photoUpdErr} = await _sb.from('scout_reports').update({photo_urls: photoUrls}).eq('id', reportId);
-      if(photoUpdErr){
-        console.error('scout_reports photo_urls update FAILED (attempt 1):', photoUpdErr);
-        ({error: photoUpdErr} = await _sb.from('scout_reports').update({photo_urls: photoUrls}).eq('id', reportId));
-        if(photoUpdErr){
-          console.error('scout_reports photo_urls update FAILED (attempt 2, giving up):', photoUpdErr);
-          alert('Report saved, but photos may not have attached correctly. Please check this report later and re-upload photos if needed.');
-        } else {
-          console.log('scout_reports photo_urls update succeeded on retry.');
-        }
-      }
-    }
 
     // Update local scoutDB -- cache the full checklist and photo URLs too
     // (not just the flattened cat/subCat summary) so a read-only detail
