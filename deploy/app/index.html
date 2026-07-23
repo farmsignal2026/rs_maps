@@ -4215,9 +4215,69 @@ function navigateToField(){
   );
 }
 
-function geoFencedScout(geoItem, type, stageKey, btnIdOverride){
+async function geoFencedScout(geoItem, type, stageKey, btnIdOverride){
   const f = getFieldByCode(geoItem.code);
   if(!f){ alert('Field not found.'); return; }
+
+  // Same "one scout per plot per day" rule submitScout() already enforces
+  // at final submission -- checked here too, at the point of TAPPING
+  // Scout, so an officer testing/tapping from the map on an
+  // already-scouted field gets told immediately, before GPS/photos/
+  // checklist, not after going through the whole flow only to be
+  // rejected at the very end. Only applies to 'scout' -- survey and
+  // followup have their own separate rules (followup already gated in
+  // startFollowup()).
+  if(type==='scout'){
+    const today = new Date().toISOString().slice(0,10);
+    try {
+      const {data:todayReports} = await _sb.from('scout_reports')
+        .select('id').eq('plot_no', geoItem.code).eq('visit_date', today).limit(1);
+      if(todayReports && todayReports.length){
+        alert('This field was already scouted today ('+today+').\n\n'
+              +'Only one scout report per field per day is allowed.');
+        return;
+      }
+    } catch(e){
+      console.log('Same-day check (tap gate) skipped:', e.message);
+    }
+
+    // No new scout while the field's most recent scout still has an
+    // OUTSTANDING follow-up -- checked here too, at the tap itself, not
+    // just at final submission (submitScout() keeps its own copy of this
+    // check as the authoritative backstop). Previously this only fired
+    // after the officer had already gone through GPS, all 3 photos, and
+    // the full checklist -- moved earlier so they're told immediately,
+    // same reasoning as the same-day check just above.
+    const FOLLOWUP_MIN_DAYS = 10;
+    const FOLLOWUP_AUTO_LIFT_DAYS = 20;
+    try {
+      const {data:latestReports} = await _sb.from('scout_reports')
+        .select('id,visit_date,follow_up_required,follow_up_date')
+        .eq('plot_no', geoItem.code).order('visit_date', {ascending:false}).limit(1);
+      const latestReport = latestReports && latestReports[0];
+
+      if(latestReport && latestReport.follow_up_required){
+        const daysSinceVisit = Math.floor((new Date(today) - new Date(latestReport.visit_date)) / 86400000);
+        if(daysSinceVisit < FOLLOWUP_AUTO_LIFT_DAYS){
+          const {data:fuRows} = await _sb.from('scout_followups')
+            .select('id').eq('scout_report_id', latestReport.id).limit(1);
+          const followupDone = fuRows && fuRows.length > 0;
+
+          if(!followupDone){
+            const proceedAnyway = confirm(
+              'This field was scouted on '+latestReport.visit_date+' and its follow-up is still pending.\n\n'
+              +'Do you want to submit a new issue for this field?'
+            );
+            if(!proceedAnyway) return;
+            // Officer confirmed this is a different issue -- fall through
+            // and continue to GPS/photos/checklist as normal.
+          }
+        }
+      }
+    } catch(e){
+      console.log('Follow-up-outstanding check (tap gate) skipped:', e.message);
+    }
+  }
 
   // Geofence check -- must be within 25m of the field boundary (or inside it)
 
@@ -5449,7 +5509,7 @@ function renderScoutAlerts() {
   const lbl = scoutFilter==='all' ? `All · ${attn.length}` : `${STATUS_CFG[scoutFilter].label} · ${counts[scoutFilter]}`;
   document.getElementById('scout-pending-count').textContent = lbl + ' fields';
   const plLbl = document.getElementById('planner-list-label');
-  if(plLbl) plLbl.textContent = 'Pending Scouts';
+  if(plLbl) plLbl.textContent = 'List of Fields';
   const plIcon = document.getElementById('planner-list-icon');
   if(plIcon) plIcon.className = 'ti ti-alert-triangle';
   const li = document.getElementById('list-label-icon');
@@ -5462,8 +5522,19 @@ function renderScoutAlerts() {
   if(clearBtn) clearBtn.style.display = searchQ ? 'block' : 'none';
 
   let filtered = scoutFilter==='all' ? attn : attn.filter(f=>getScoutStatus(f.code).type===scoutFilter);
-  // Sort A→Z by farmer name, matching the Fields screen order
-  filtered = filtered.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  // Sort oldest-scouted-first, so the field whose follow-up is coming due
+  // soonest naturally rises to the top of the list. Fields with no scout
+  // yet at all (Unattended/Scheduled) have no visit_date to compare, so
+  // they keep their original relative order via a stable sort rather than
+  // being arbitrarily shuffled.
+  filtered = filtered.slice().sort((a,b)=>{
+    const da = getScoutStatus(a.code).s ? getScoutStatus(a.code).s.visit_date : null;
+    const db = getScoutStatus(b.code).s ? getScoutStatus(b.code).s.visit_date : null;
+    if(!da && !db) return 0;
+    if(!da) return 1;
+    if(!db) return -1;
+    return da.localeCompare(db); // ascending -- oldest visit_date first
+  });
   if(searchQ){
     filtered = filtered.filter(f=>
       f.name.toLowerCase().includes(searchQ) ||
@@ -5503,8 +5574,23 @@ function renderScoutAlerts() {
     else if(st.type==='scheduled') buttons = `
       <button onclick="event.stopPropagation();openScheduleModal('${code}')" style="flex:1;padding:7px;border-radius:7px;background:#E6F1FB;color:#185FA5;border:1px solid #B5D4F4;font-size:11px;font-weight:600;cursor:pointer"><i class="ti ti-edit"></i> Reschedule</button>
       <button onclick="event.stopPropagation();openScoutMapView('${code}')" style="flex:1;padding:7px;border-radius:7px;background:#8B4500;color:#FFE0B8;border:none;font-size:11px;font-weight:600;cursor:pointer"><i class="ti ti-map-pin"></i> Scout Now</button>`;
-    else if(st.type==='scouted'||st.type==='overdue') buttons = `
+    else if(st.type==='scouted'||st.type==='overdue'){
+      // Follow-up isn't available until 10 days after the scout visit --
+      // show a genuinely inactive/greyed button before then, with the
+      // days remaining, instead of an active-looking button that only
+      // rejects the tap after the fact (startFollowup() still enforces
+      // this as the authoritative check either way).
+      const FOLLOWUP_MIN_DAYS = 10;
+      const daysSinceVisit = st.s && st.s.visit_date ? daysBetween(st.s.visit_date, new Date().toISOString().slice(0,10)) : FOLLOWUP_MIN_DAYS;
+      if(daysSinceVisit < FOLLOWUP_MIN_DAYS){
+        const daysLeft = FOLLOWUP_MIN_DAYS - daysSinceVisit;
+        buttons = `
+      <button disabled style="flex:1;padding:7px;border-radius:7px;background:#E5E7EB;color:#9CA3AF;border:none;font-size:11px;font-weight:600;cursor:not-allowed"><i class="ti ti-lock"></i> Follow-up in ${daysLeft}d</button>`;
+      } else {
+        buttons = `
       <button onclick="event.stopPropagation();startFollowup('${code}')" style="flex:1;padding:7px;border-radius:7px;background:#185FA5;color:#E6F1FB;border:none;font-size:11px;font-weight:600;cursor:pointer"><i class="ti ti-refresh"></i> ${st.type==='overdue'?'⚠ Follow-up Now':'Follow-up Scout'}</button>`;
+      }
+    }
     else if(st.type==='closed') buttons = `
       <button onclick="event.stopPropagation();openScoutDetail('${code}')" style="padding:7px 12px;border-radius:7px;background:#F1EFE8;color:#3B6D11;border:1px solid #C0DD97;font-size:11px;font-weight:600;cursor:pointer"><i class="ti ti-eye"></i> View</button>`;
 
