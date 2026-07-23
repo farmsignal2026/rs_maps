@@ -4305,9 +4305,35 @@ function launchScoutOrSurvey(f, type, stageKey){
 // runs it through the same 25m geofence check Scout already uses,
 // before opening the Follow-up form. Previously Follow-up could be
 // opened from anywhere with no location check at all.
-function startFollowup(code, btnId){
+async function startFollowup(code, btnId){
   const geoItem = getGeoByCode(code);
   if(!geoItem){ alert('Field location data not available.'); return; }
+
+  // Follow-up not active until 10 days after the original scout visit --
+  // gated here at the tap itself (every Follow-up button across the app
+  // funnels through this one function), not just at final submission, so
+  // the officer isn't sent through the whole photo/checklist flow only to
+  // be rejected at the end. submitFollowup() still re-checks this too, as
+  // a backstop.
+  const FOLLOWUP_MIN_DAYS = 10;
+  try {
+    const {data:latestReports} = await _sb.from('scout_reports')
+      .select('visit_date').eq('plot_no', code)
+      .order('visit_date', {ascending:false}).limit(1);
+    const latestReport = latestReports && latestReports[0];
+    if(latestReport){
+      const daysSinceVisit = Math.floor((new Date(new Date().toISOString().slice(0,10)) - new Date(latestReport.visit_date)) / 86400000);
+      if(daysSinceVisit < FOLLOWUP_MIN_DAYS){
+        alert('Follow-up not available yet.\n\n'
+              +'This field was scouted on '+latestReport.visit_date+' ('+daysSinceVisit+' day(s) ago). '
+              +'Follow-ups open '+FOLLOWUP_MIN_DAYS+' days after the scout visit -- please come back after day '+FOLLOWUP_MIN_DAYS+'.');
+        return;
+      }
+    }
+  } catch(e){
+    console.log('Follow-up minimum-days check (tap gate) skipped:', e.message);
+  }
+
   geoFencedScout(geoItem, 'followup', null, btnId);
 }
 
@@ -5780,9 +5806,61 @@ async function submitScout() {
   if(existingToday){
     reEnable();
     alert('A scout report for this field was already submitted today ('+today+').\n\n'
-          +'Only one scout report per plot per day is allowed. If you need to add more detail, '
+          +'Only one scout report for the same field is allowed per day. If you need to add more detail, '
           +'edit or follow up on the existing report instead of submitting a new one.');
     return;
+  }
+
+  // No new scout for this field while its most recent scout still has an
+  // OUTSTANDING follow-up -- avoids re-scouting the same issue before its
+  // own follow-up cycle has even happened. Uses a LIVE query against
+  // scout_followups (not the local scoutDB.followupDone cache) for the
+  // same reason the same-day check above uses scoutByPlot instead of a
+  // local flag -- a stale local cache is exactly what let duplicate scout
+  // submissions through before that fix.
+  //
+  // Two deliberate escape valves, agreed with the client before building
+  // this: (1) the officer can explicitly override if this is a genuinely
+  // NEW/different issue, not the same one the outstanding follow-up
+  // already covers -- proceeds either way, just requires a confirm rather
+  // than silently blocking; (2) the block auto-lifts 25 days after the
+  // original visit even with no follow-up ever submitted, so a forgotten
+  // or abandoned follow-up can't permanently strand a plot from ever
+  // being scouted again.
+  const FOLLOWUP_MIN_DAYS = 10;
+  const FOLLOWUP_AUTO_LIFT_DAYS = 20;
+  try {
+    const {data:latestReports} = await _sb.from('scout_reports')
+      .select('id,visit_date,follow_up_required,follow_up_date')
+      .eq('plot_no', fieldCode).order('visit_date', {ascending:false}).limit(1);
+    const latestReport = latestReports && latestReports[0];
+
+    if(latestReport && latestReport.follow_up_required){
+      const daysSinceVisit = Math.floor((new Date(today) - new Date(latestReport.visit_date)) / 86400000);
+      if(daysSinceVisit < FOLLOWUP_AUTO_LIFT_DAYS){
+        const {data:fuRows} = await _sb.from('scout_followups')
+          .select('id').eq('scout_report_id', latestReport.id).limit(1);
+        const followupDone = fuRows && fuRows.length > 0;
+
+        if(!followupDone){
+          reEnable();
+          const proceedAnyway = confirm(
+            'This field was scouted on '+latestReport.visit_date+' and its follow-up is still pending.\n\n'
+            +'Do you want to submit a new issue for this field?'
+          );
+          if(!proceedAnyway) return;
+          // Officer confirmed this is a different issue -- proceed, but
+          // re-disable the button since reEnable() above turned it back on
+          // for the confirm dialog.
+          if(btn){ btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2" style="font-size:18px"></i> Saving...'; }
+        }
+      }
+    }
+  } catch(e){
+    // If this check itself fails (offline, RLS hiccup, etc.), don't block
+    // the whole submission over it -- fail open here, same spirit as the
+    // rest of this app's offline-queueing behavior elsewhere.
+    console.log('Follow-up-outstanding check skipped:', e.message);
   }
 
   // Validate mandatory 3 photos
@@ -6065,6 +6143,18 @@ async function submitScout() {
     if(insertErr) throw insertErr;
 
     const reportId = inserted[0].id;
+
+    // BUGFIX: the same-day duplicate check earlier in this function reads
+    // scoutByPlot[fieldCode] -- but without this update, a successful
+    // submission was never actually added back into that local cache, so
+    // any FURTHER submission attempt within the SAME still-open session
+    // (no full page reload in between) would check against a stale
+    // snapshot that still didn't know about this one, and let a genuine
+    // same-day duplicate through. Confirmed real: 3 duplicate reports for
+    // one plot, 7-11 minutes apart -- too slow to be a race condition,
+    // exactly matching "officer resubmitted later in the same session."
+    if(!scoutByPlot[fieldCode]) scoutByPlot[fieldCode] = [];
+    scoutByPlot[fieldCode].unshift({...reportRow, id: reportId, created_at: new Date().toISOString()});
 
     // Update local scoutDB -- cache the full checklist and photo URLs too
     // (not just the flattened cat/subCat summary) so a read-only detail
@@ -6575,6 +6665,34 @@ async function submitFollowup() {
   if(!fuState.help){ alert('Please indicate if expert help is needed.'); return; }
 
   const code = fuState.fieldCode;
+
+  // Follow-up not allowed before 10 days have passed since the original
+  // scout visit -- too early to meaningfully judge whether a
+  // recommendation/treatment actually took effect. Fresh live query for
+  // the original visit_date rather than trusting fuState (which could be
+  // stale if this screen was left open a while before submitting).
+  const FOLLOWUP_MIN_DAYS = 10;
+  try {
+    const {data:latestReports} = await _sb.from('scout_reports')
+      .select('visit_date').eq('plot_no', code)
+      .order('visit_date', {ascending:false}).limit(1);
+    const latestReport = latestReports && latestReports[0];
+    if(latestReport){
+      const daysSinceVisit = Math.floor((new Date(new Date().toISOString().slice(0,10)) - new Date(latestReport.visit_date)) / 86400000);
+      if(daysSinceVisit < FOLLOWUP_MIN_DAYS){
+        alert('It\'s only been '+daysSinceVisit+' day(s) since the original scout visit ('+latestReport.visit_date+').\n\n'
+              +'Follow-ups aren\'t allowed until at least '+FOLLOWUP_MIN_DAYS+' days have passed -- '
+              +'too early to judge whether a recommendation had time to take effect.\n\n'
+              +'Please come back after day '+FOLLOWUP_MIN_DAYS+' to complete this follow-up.');
+        return;
+      }
+    }
+  } catch(e){
+    // Don't block the whole follow-up over this check failing (offline,
+    // RLS hiccup) -- fail open, same as the equivalent check in submitScout().
+    console.log('Follow-up minimum-days check skipped:', e.message);
+  }
+
   const cropVal = fuState.crop; // 'Improved' | 'Same-Status' | 'Still-Worst'
   const remarks = (document.getElementById('fu-remarks')||{}).value || '';
   const today = new Date().toISOString().slice(0,10);
