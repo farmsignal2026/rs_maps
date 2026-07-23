@@ -638,6 +638,8 @@ td.mono{font-family:'DM Mono',monospace;font-size:11px}
     <div class="sbs">
       <div class="sbl">🔎 Filters</div>
       <div class="sbfilters">
+        <div class="fg"><label>Client</label>
+          <select id="fTrueClient" onchange="onTrueClientChange()"><option value="">All</option></select></div>
         <div class="fg"><label>Factory / Mill</label>
           <select id="fClient" onchange="onFC('client')"><option value="">All</option></select></div>
         <div class="fg"><label>Plant Season</label>
@@ -1852,8 +1854,7 @@ async function loadFromSupabase(){
     renderSeasonFilterDropdown(); updSeasonTrig(); applySeasonDefaultsToAllPanels();
     updateDataDatePill(); filteredRows=applyFilters(); renderAll();
     // Rebuild all filter dropdowns including Client
-    const clients=[...new Set(allRows.map(r=>r.client).filter(Boolean))].sort();
-    document.getElementById('fClient').innerHTML='<option value="">All</option>'+clients.map(c=>`<option value="${c}">${c}</option>`).join('');
+    buildClientAndFactoryDropdowns();
     populateCascadeFilters('','');
     // Trigger map init if that tab is active
     if(activeTab==='map' && !fieldMapInst) initFieldMap();
@@ -2221,9 +2222,15 @@ function getPlotCoverageStats(){
   // fieldDetailsMeta so the counts change when filters change.
   const cl  = document.getElementById('fClient')?.value || '';
   const pt  = document.getElementById('fPlotType')?.value || '';
+  // fieldDetailsMeta doesn't carry the true client code (only the
+  // factory-name-mislabeled 'client' field) -- build a plotID lookup
+  // fresh from allRows, same derivation trueClientOf() uses elsewhere.
+  const plotTrueClient = {};
+  if(selTrueClient) allRows.forEach(r=>{ if(r.plotID) plotTrueClient[r.plotID]=trueClientOf(r); });
   const plotIDs = fieldDetailsPlotIDs.filter(pid=>{
     const m = fieldDetailsMeta[pid];
     if(!m) return true; // no metadata -- include rather than silently drop
+    if(selTrueClient && plotTrueClient[pid]!==undefined && plotTrueClient[pid]!==selTrueClient) return false;
     if(cl && m.client !== cl) return false;
     if(selDivision.size > 0 && !selDivision.has(m.division)) return false;
     if(pt && m.plotType !== pt) return false;
@@ -2240,6 +2247,43 @@ let boundaryByPlotID={};   // built once when Tab 6 loads: {plotID: {polygon:[[l
 const S1_GAP_DAYS=7; // trigger S1 fill when last S2 older than this
 let selPlots=new Set();
 let selFarmer=new Set(); // empty = all
+let selTrueClient=''; // '' = all -- true client code (RSCL/MEHTA), derived from fieldName's prefix
+// fieldName is always built as "{trueClientCode}-{plot_no}" (see 'Field'
+// construction during data load) -- extracting from the first hyphen
+// avoids needing a whole new field threaded through mergeAll()/every row.
+function trueClientOf(r){
+  if(!r || !r.fieldName) return '';
+  const i = r.fieldName.indexOf('-');
+  return i>=0 ? r.fieldName.slice(0,i) : '';
+}
+// Builds both the Client dropdown (always shows every client that exists
+// in the data) and the Factory/Mill dropdown (narrowed to whichever
+// client is currently selected, or all factories if Client='All').
+// Shared by every place that used to independently rebuild the Factory/
+// Mill list -- previously 3 identical duplicated blocks.
+function buildClientAndFactoryDropdowns(){
+  const trueClients=[...new Set(allRows.map(trueClientOf).filter(Boolean))].sort();
+  const tcEl=document.getElementById('fTrueClient');
+  const prevTc=tcEl?tcEl.value:'';
+  if(tcEl){
+    tcEl.innerHTML='<option value="">All</option>'+trueClients.map(c=>`<option value="${c}">${c}</option>`).join('');
+    if(trueClients.includes(prevTc)) tcEl.value=prevTc; else selTrueClient='';
+  }
+  const base = selTrueClient ? allRows.filter(r=>trueClientOf(r)===selTrueClient) : allRows;
+  const clients=[...new Set(base.map(r=>r.client).filter(Boolean))].sort();
+  document.getElementById('fClient').innerHTML='<option value="">All</option>'+clients.map(c=>`<option value="${c}">${c}</option>`).join('');
+}
+function onTrueClientChange(){
+  selTrueClient = document.getElementById('fTrueClient').value;
+  // Changing Client cascades down through everything below it, same as
+  // changing Factory/Mill already does.
+  document.getElementById('fClient').value='';
+  selDivision.clear(); selVillage.clear(); selFarmer.clear(); selPlots.clear();
+  buildClientAndFactoryDropdowns();
+  populateCascadeFilters('','');
+  filteredRows=applyFilters();
+  renderAll();
+}
 let selDivision=new Set(); // empty = all
 let selVillage=new Set(); // empty = all
 let selVariety=new Set(); // empty = all -- no dedicated dropdown yet, used by Stage Matrix's "view in cards" click
@@ -2444,8 +2488,7 @@ async function autoLoadFromServer(){
   const uploadBody=document.getElementById('uploadCardsBody');
   if(uploadBody && uploadBody.style.display!=='none') toggleUploadSection();
   setTimeout(function(){ if(activeTab==='trend') renderTrend(); }, 300);
-  const clients=[...new Set(allRows.map(r=>r.client).filter(Boolean))].sort();
-  document.getElementById('fClient').innerHTML='<option value="">All</option>'+clients.map(c=>`<option value="${c}">${c}</option>`).join('');
+    buildClientAndFactoryDropdowns();
   populateCascadeFilters('','');
   renderSeasonFilterDropdown(); updSeasonTrig(); applySeasonDefaultsToAllPanels();
   filteredRows=applyFilters();renderAll();
@@ -2878,6 +2921,7 @@ function applyFilters(){
   const st=document.getElementById('fStage').value;
   const ss=document.getElementById('fStatus').value;
   let d=allRows;
+  if(selTrueClient) d=d.filter(r=>trueClientOf(r)===selTrueClient);
   if(cl) d=d.filter(r=>r.client===cl);
   if(selectedSeasonYears.length>0){
     const seasonLabels=selectedSeasonYears.map(seasonLabelForYear);
@@ -2937,8 +2981,9 @@ function onFC(changed){
 }
 
 function populateCascadeFilters(cl,fa){
-  // base filtered by client
+  // base filtered by true client, then factory/mill
   let base=allRows;
+  if(selTrueClient) base=base.filter(r=>trueClientOf(r)===selTrueClient);
   if(cl)base=base.filter(r=>r.client===cl);
 
   // divisions
@@ -3481,10 +3526,13 @@ document.addEventListener('click',e=>{
 });
 
 function resetFilters(){
+  selTrueClient='';
+  document.getElementById('fTrueClient').value='';
   document.getElementById('fClient').value='';
   document.getElementById('fPlotType').value='';
   document.getElementById('fStage').value='';
   document.getElementById('fStatus').value='';
+  buildClientAndFactoryDropdowns();
   selDivision.clear();
   selVillage.clear();
   selFarmer.clear();
@@ -6428,8 +6476,7 @@ document.getElementById('runBtn').addEventListener('click',async ()=>{
   if(uploadBody && uploadBody.style.display!=='none') toggleUploadSection();
   // Auto-render Health Trend on first load
   setTimeout(function(){ if(activeTab==='trend') renderTrend(); }, 300);
-  const clients=[...new Set(allRows.map(r=>r.client).filter(Boolean))].sort();
-  document.getElementById('fClient').innerHTML='<option value="">All</option>'+clients.map(c=>`<option value="${c}">${c}</option>`).join('');
+    buildClientAndFactoryDropdowns();
   populateCascadeFilters('','');
   renderSeasonFilterDropdown(); updSeasonTrig(); applySeasonDefaultsToAllPanels();
   filteredRows=applyFilters();renderAll();
