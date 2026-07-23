@@ -638,7 +638,7 @@ td.mono{font-family:'DM Mono',monospace;font-size:11px}
     <div class="sbs">
       <div class="sbl">🔎 Filters</div>
       <div class="sbfilters">
-        <div class="fg"><label>Client</label>
+        <div class="fg"><label>Factory / Mill</label>
           <select id="fClient" onchange="onFC('client')"><option value="">All</option></select></div>
         <div class="fg"><label>Plant Season</label>
           <div class="pmwrap" id="seasonmwrap">
@@ -810,6 +810,24 @@ td.mono{font-family:'DM Mono',monospace;font-size:11px}
           <div style="font-size:10px;color:var(--n400);margin-top:5px;line-height:1.4">
             Flags Good/Moderate fields with a significant recent drop
           </div>
+        </div>
+      </div>
+    </div>
+    <div class="sbs" style="margin-top:2px">
+      <div class="sbl" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleSbSection('suspicionBody','suspicionChevron')">
+        <span>🔍 Fields of suspicion</span>
+        <span id="suspicionChevron" style="font-size:11px;transition:transform .2s;transform:rotate(-90deg)">▾</span>
+      </div>
+      <div id="suspicionBody" style="display:none">
+        <div style="padding:6px 10px 10px">
+          <label id="suspPlantingRow" style="display:flex;align-items:center;gap:7px;padding:7px 8px;cursor:pointer;border-radius:6px;font-size:12.5px;color:var(--n700)">
+            <input type="checkbox" id="suspPlantingCheck" onchange="viewSuspicionFields('planting')" style="cursor:pointer;margin:0">
+            🌱 Planting date
+          </label>
+          <label id="suspWeedRow" style="display:flex;align-items:center;gap:7px;padding:7px 8px;cursor:pointer;border-radius:6px;font-size:12.5px;color:var(--n700)">
+            <input type="checkbox" id="suspWeedCheck" onchange="viewSuspicionFields('weed')" style="cursor:pointer;margin:0">
+            🌾 Weed
+          </label>
         </div>
       </div>
     </div>
@@ -1522,16 +1540,17 @@ async function loadFromSupabase(){
     // a full page reload) stacks a second full copy on top of the first.
     // Confirmed real: exactly double-counted scout reports (37 actual rows
     // showing as 74) traced to this exact gap.
-    pngMap = {}; photosByPlot = {}; scoutByPlot = {}; followupsByReportId = {};
+    pngMap = {}; photosByPlot = {}; scoutByPlot = {}; followupsByReportId = {}; officerMap = {};
 
     // -- Tab 2: Field details (plots + active plot_seasons) -------------
     // Fetch hierarchy name lookups + farmers
-    const [divRes, secRes, vilRes, facRes, farRes] = await Promise.all([
+    const [divRes, secRes, vilRes, facRes, farRes, offRes] = await Promise.all([
       sb.from('divisions').select('code,name'),
       sb.from('sections').select('code,name'),
       sb.from('villages').select('code,name'),
       sb.from('factories').select('code,name,group_code'),
       sb.from('farmers').select('id,name,farmer_code'),
+      sb.from('farm_officers').select('id,name'),
     ]);
     const divMap = Object.fromEntries((divRes.data||[]).map(r=>[r.code, r.name]));
     const secMap = Object.fromEntries((secRes.data||[]).map(r=>[r.code, r.name]));
@@ -1543,6 +1562,10 @@ async function loadFromSupabase(){
     // officer/manager/admin scoping.
     const facClientMap = Object.fromEntries((facRes.data||[]).map(r=>[r.code, r.group_code || 'RSCL']));
     const farMap = Object.fromEntries((farRes.data||[]).map(r=>[r.id, r]));
+    // officer_id -> officer name, for the "who scouted" columns on
+    // reports 4 and 5.
+    officerMap = Object.fromEntries((offRes.data||[]).map(r=>[r.id, r.name]));
+
 
     // Fetch plots with active season
     const {data:plotData, error:plotErr} = await sb
@@ -1758,7 +1781,7 @@ async function loadFromSupabase(){
     showSbStatus('Loading scout reports...');
     const {data:scoutData, error:scoutErr} = await sb
       .from('scout_reports')
-      .select('id,plot_no,visit_date,stress_type,stress_severity,notes,checklist,action_required,follow_up_date,follow_up_required,photo_urls,created_at')
+      .select('id,plot_no,visit_date,stress_type,stress_severity,notes,checklist,action_required,follow_up_date,follow_up_required,photo_urls,created_at,officer_id')
       .order('visit_date', {ascending: false});
     if(!scoutErr && scoutData){
       scoutData.forEach(r=>{
@@ -1924,7 +1947,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   })();
 });
 
-let rawS=null,rawF=null,rawS1=null,rawPC=null,pngMap={},photosByPlot={},scoutByPlot={},followupsByReportId={},fileS=null,fileF=null,fileS1=null,filePC=null,allRows=[],filteredRows=[],activeTab='trend',chartInst=null;
+let rawS=null,rawF=null,rawS1=null,rawPC=null,pngMap={},photosByPlot={},scoutByPlot={},followupsByReportId={},officerMap={},fileS=null,fileF=null,fileS1=null,filePC=null,allRows=[],filteredRows=[],activeTab='trend',chartInst=null;
 // Off by default: a plot whose only observation is an S1 (SAR) gap-fill
 // estimate, with no real S2 optical reading ever, is treated as having
 // no data at all rather than showing the estimate -- matches the same
@@ -2222,6 +2245,12 @@ let selVillage=new Set(); // empty = all
 let selVariety=new Set(); // empty = all -- no dedicated dropdown yet, used by Stage Matrix's "view in cards" click
 let cardSortDir='asc'; // 'asc'=oldest/lowest first, 'desc'=newest/highest first
 let cardSortKey='plantDate'; // 'plantDate' | 'ndvi'
+const CARDS_PAGE_SIZE=50;
+let cardsPage=1;
+let lastCardsFieldsKey='';   // fingerprint of the last rendered field set --
+                              // used to auto-reset to page 1 when filters
+                              // actually change, vs. staying put when the
+                              // page change itself triggers a re-render.
 let allPlots=[]; // full plot list for search restore
 
 /* -- BUILD STAGE INPUTS -- */
@@ -2900,7 +2929,7 @@ function onFC(changed){
   // attention" card filter = an always-empty intersection). toggleStatFilter
   // already clears the dropdown when a card is clicked; this is the
   // missing mirror of that in the other direction.
-  if(changed==='status' && statCardFilter){ statCardFilter=''; }
+  if(changed==='status' && statCardFilter){ statCardFilter=''; updateSuspicionCheckboxes(); }
   const fa=selFarmer.size===1?[...selFarmer][0]:'';
   populateCascadeFilters(cl,fa);
   filteredRows=applyFilters();
@@ -3468,6 +3497,7 @@ function resetFilters(){
     if(clearBtn) clearBtn.style.display='none';
   }
   statCardFilter='';
+  updateSuspicionCheckboxes();
   populateCascadeFilters('','');
   renderSeasonFilterDropdown(); updSeasonTrig(); applySeasonDefaultsToAllPanels();
   filteredRows=applyFilters();renderAll();
@@ -3558,8 +3588,38 @@ function toggleStatFilter(status){
   statCardFilter = statCardFilter===status ? '' : status;
   // also clear the dropdown status filter so they don't conflict
   document.getElementById('fStatus').value='';
+  updateSuspicionCheckboxes();
   filteredRows=applyFilters();
   renderAll();
+}
+
+// Sidebar "Fields of Suspicion" sub-items -- sets the matching stat-card
+// filter and jumps to Field cards, same toggle pattern toggleStatFilter
+// uses (clicking the same one again clears it).
+function viewSuspicionFields(type){
+  const newFilter = type==='weed' ? 'SuspicionWeed' : 'SuspicionPlanting';
+  statCardFilter = (statCardFilter===newFilter) ? '' : newFilter;
+  document.getElementById('fStatus').value='';
+  filteredRows=applyFilters();
+  updateSuspicionCheckboxes();
+  if(statCardFilter) switchTab('cards', null); else renderAll();
+}
+
+// Keeps the sidebar checkboxes/highlight in sync with statCardFilter no
+// matter how it changed -- clicking a checkbox here, clicking a regular
+// KPI stat card elsewhere, or any filter-reset action. Called from every
+// place statCardFilter gets set or cleared.
+function updateSuspicionCheckboxes(){
+  const pC=document.getElementById('suspPlantingCheck');
+  const wC=document.getElementById('suspWeedCheck');
+  const pR=document.getElementById('suspPlantingRow');
+  const wR=document.getElementById('suspWeedRow');
+  const pOn = statCardFilter==='SuspicionPlanting';
+  const wOn = statCardFilter==='SuspicionWeed';
+  if(pC) pC.checked = pOn;
+  if(wC) wC.checked = wOn;
+  if(pR) pR.style.background = pOn ? '#fef3c7' : '';
+  if(wR) wR.style.background = wOn ? '#fef3c7' : '';
 }
 
 function applyStatCardFilter(data){
@@ -3576,6 +3636,48 @@ function applyStatCardFilter(data){
     // the serious subset (3+) has its own card/filter.
     const streaks=computeAttentionStreaks(data);
     matchFields=new Set(latest.filter(r=>severityLabel(r,streaks)==='Need attention').map(r=>r.fieldName));
+  } else if(statCardFilter==='SuspicionPlanting'){
+    // Reuses r.plantDateSuspect, the same flag already driving Report 3's
+    // "Watch Planting date outliers" export, computed once on each plot's
+    // FIRST observation.
+    // BUGFIX: build history from allRows (complete), not data (the
+    // sidebar-filtered set, e.g. narrowed by Plant Season) -- otherwise an
+    // active filter can silently exclude a plot's actual first
+    // observation from consideration. latest still comes from data, so
+    // WHICH plots get evaluated still respects the current filter scope --
+    // only the history lookup itself needs to be complete.
+    const byField={};
+    allRows.forEach(r=>{ if(!byField[r.fieldName]) byField[r.fieldName]=[]; byField[r.fieldName].push(r); });
+    matchFields=new Set(latest.filter(r=>{
+      const obs=byField[r.fieldName]||[];
+      const first=obs.slice().sort((a,b)=>a.satDate-b.satDate)[0];
+      return first && first.plantDateSuspect;
+    }).map(r=>r.fieldName));
+  } else if(statCardFilter==='SuspicionWeed'){
+    // Weed suspicion: any of the plot's LAST 3 confirmed observations
+    // (regardless of which stage each one individually falls in) shows
+    // NDVI at or above 0.06 over the CURRENT stage's ndviMax threshold --
+    // can indicate dense weed canopy inflating the reading rather than
+    // healthy cane growth. Uses >= (not strict >) deliberately -- confirmed
+    // real: plot 8000800797 had a reading of exactly 0.760 against a
+    // threshold of exactly 0.76 (ndviMax 0.70 + 0.06), which a strict >
+    // comparison silently excluded.
+    // History is built from allRows (complete), not data (the sidebar-
+    // filtered set) -- an active filter like Plant Season could otherwise
+    // exclude the relevant observation from `data` before this function
+    // ever saw it. latest still comes from data, so which PLOTS get
+    // evaluated still respects the current filter scope.
+    const byField={};
+    allRows.forEach(r=>{ if(!byField[r.fieldName]) byField[r.fieldName]=[]; byField[r.fieldName].push(r); });
+    matchFields=new Set(latest.filter(r=>{
+      const obs=byField[r.fieldName]||[];
+      const stage = r.stage;
+      if(!stage) return false;
+      const recent = obs.filter(o=>!o.isS1 && o.confidence!=='low')
+                         .sort((a,b)=>b.satDate-a.satDate)   // most recent first
+                         .slice(0,3);                          // last 3 observations
+      return recent.some(o=>(+o.ndvi) >= (stage.ndviMax + 0.06));
+    }).map(r=>r.fieldName));
   } else {
     matchFields=new Set(latest.filter(r=>r.status.label===statCardFilter).map(r=>r.fieldName));
   }
@@ -3666,10 +3768,6 @@ function renderOverview(){
   const scopedPlotCodes = new Set(latest.map(d=>d.plotID));
   const allScouts = Object.values(scoutByPlot).flat().filter(r => scopedPlotCodes.has(r.plot_no));
   const scoutedPlots = Object.keys(scoutByPlot).filter(p => scopedPlotCodes.has(p));
-  console.log('[DEBUG scout scoping]', 'fClient=', document.getElementById('fClient').value,
-              'latest.length=', latest.length, 'scopedPlotCodes.size=', scopedPlotCodes.size,
-              'total scoutByPlot entries=', Object.keys(scoutByPlot).length,
-              'allScouts (scoped)=', allScouts.length, 'scoutedPlots (scoped)=', scoutedPlots.length);
   const needAttnTotal = attn + serious;
 
   // Follow-up overdue = follow_up_date < today and not done
@@ -4614,6 +4712,14 @@ function buildStageProgressBar(latest, obs){
     +'</div>';
 }
 
+// Field Cards pagination -- re-renders with the same underlying filtered
+// data, just a different page. lastCardsFieldsKey staying the same across
+// this call is what tells renderCards() not to reset back to page 1.
+function cardsGoToPage(p){
+  cardsPage=p;
+  renderAll();
+}
+
 function renderCards(data){
   var byField={};
   data.forEach(function(r){
@@ -4657,9 +4763,20 @@ function renderCards(data){
     return;
   }
 
+  // Pagination -- large field sets were slow to render as one long grid.
+  // Reset to page 1 only when the underlying field SET actually changed
+  // (a new filter, a different sort), not when the page itself changed
+  // (cardsGoToPage() re-renders with the same field set on purpose).
+  var fieldsKey=fields.join(',');
+  if(fieldsKey!==lastCardsFieldsKey){ cardsPage=1; lastCardsFieldsKey=fieldsKey; }
+  var totalPages=Math.max(1, Math.ceil(fields.length/CARDS_PAGE_SIZE));
+  if(cardsPage>totalPages) cardsPage=totalPages;
+  if(cardsPage<1) cardsPage=1;
+  var pageFields=fields.slice((cardsPage-1)*CARDS_PAGE_SIZE, cardsPage*CARDS_PAGE_SIZE);
+
   var html='';
   var cardStreaks=computeAttentionStreaks(data);
-  fields.forEach(function(fn){
+  pageFields.forEach(function(fn){
     var obs=byField[fn].slice().sort(function(a,b){return a.satDate-b.satDate;});
     var latest=latestConfirmed(obs);
     var stage=latest.stage;
@@ -4856,11 +4973,22 @@ function renderCards(data){
       +'</div>'
     +'</div>';
   });
+
+  if(totalPages>1){
+    html += '<div style="grid-column:1/-1;display:flex;justify-content:center;align-items:center;gap:14px;padding:18px 0 6px">'
+      + '<button onclick="cardsGoToPage('+(cardsPage-1)+')"' + (cardsPage<=1?' disabled':'')
+      + ' style="padding:6px 14px;border-radius:6px;border:1px solid var(--n300);background:'+(cardsPage<=1?'var(--n100)':'#fff')+';cursor:'+(cardsPage<=1?'default':'pointer')+';font-size:13px;color:'+(cardsPage<=1?'var(--n400)':'var(--n700)')+'">&laquo; Prev</button>'
+      + '<span style="font-size:12.5px;color:var(--n500)">Page '+cardsPage+' of '+totalPages+' &nbsp;('+fields.length+' fields)</span>'
+      + '<button onclick="cardsGoToPage('+(cardsPage+1)+')"' + (cardsPage>=totalPages?' disabled':'')
+      + ' style="padding:6px 14px;border-radius:6px;border:1px solid var(--n300);background:'+(cardsPage>=totalPages?'var(--n100)':'#fff')+';cursor:'+(cardsPage>=totalPages?'default':'pointer')+';font-size:13px;color:'+(cardsPage>=totalPages?'var(--n400)':'var(--n700)')+'">Next &raquo;</button>'
+      + '</div>';
+  }
+
   grid.innerHTML=html;
 
   // draw sparklines after DOM settles
   requestAnimationFrame(function(){
-    fields.forEach(function(fn){
+    pageFields.forEach(function(fn){
       var obs=byField[fn].slice().sort(function(a,b){return a.satDate-b.satDate;});
       var stage=obs[obs.length-1].stage;
       var safeid=fn.replace(/[^a-zA-Z0-9]/g,'_');
@@ -5552,6 +5680,7 @@ function viewGroupInCards(groupKey, groupName){
   document.getElementById('fPlotType').value='';
   selDivision.clear(); selVillage.clear(); selFarmer.clear(); selVariety.clear();
   statCardFilter='';
+  updateSuspicionCheckboxes();
 
   if(groupKey==='client') document.getElementById('fClient').value=groupName;
   else if(groupKey==='division') selDivision.add(groupName);
@@ -6456,35 +6585,30 @@ function exportPlantDateOutliers(){
   a.download='plant_date_outliers_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
 }
 
-// 4. Division scout status -- one row per division, plot counts across
-// Unattended/Scouted/Overdue/Closed. Same status classifier as Scout
-// Analytics and the Overview tab, so the numbers always agree with what's
-// shown on screen.
+// 4. Division scout status -- CHANGED from one row per division (counts
+// only) to one row per PLOT: a division-level aggregate can't meaningfully
+// show a single "officer" or "date" (a division has many plots, many
+// officers, many visit dates), so answering "who scouted this" required
+// dropping to plot granularity. Division and Mill/Client are still
+// included as columns, so you can still sort/pivot back up to a division
+// view in Excel if the aggregate counts are what's needed -- just no
+// longer pre-aggregated in the export itself.
 function exportDivisionScoutStatusCSV(){
   const viewData=applyStatCardFilter(filteredRows);
   const plotIDs=[...new Set(viewData.map(r=>r.plotID))];
   const meta={};
   latestPerField(allRows).forEach(r=>{ if(r.plotID) meta[r.plotID]={client:r.client||'Unknown', division:r.division||'Unknown'}; });
 
-  const statuses=['Unattended','Scouted','Overdue','Closed'];
-  const groups={};
-  plotIDs.forEach(pid=>{
+  const hdr=['Plot No','Division','Mill/Client','Scout Status','Officer','Date of Scout'];
+  const rows=plotIDs.map(pid=>{
     const m=meta[pid]||{client:'Unknown',division:'Unknown'};
-    const g=m.division;
-    if(!groups[g]) groups[g]={client:m.client,'Unattended':0,'Scouted':0,'Overdue':0,'Closed':0,total:0};
     const st=saScoutStatusForPlot(pid);
-    groups[g][st]++;
-    groups[g].total++;
-  });
-
-  const hdr=['Division','Mill/Client','Total Plots',...statuses,...statuses.map(s=>s+' %')];
-  const rows=Object.keys(groups).sort((a,b)=>groups[b].total-groups[a].total).map(g=>{
-    const st=groups[g];
-    return [g, st.client, st.total,
-      ...statuses.map(s=>st[s]),
-      ...statuses.map(s=>st.total?Math.round(st[s]/st.total*100)+'%':'0%')
-    ];
-  });
+    const reports=(scoutByPlot[pid]||[]).slice().sort((a,b)=>(b.visit_date||'').localeCompare(a.visit_date||''));
+    const latest=reports[0];
+    const officer=latest ? (officerMap[latest.officer_id]||'Unknown') : '';
+    const scoutDate=latest ? (latest.visit_date||'') : '';
+    return [pid, m.division, m.client, st, officer, scoutDate];
+  }).sort((a,b)=> a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]));
 
   if(!rows.length){ alert('No plots in the current filter set.'); return; }
   const csv=[hdr,...rows].map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');
@@ -6503,6 +6627,40 @@ function exportScoutReasonsCSV(){
   const meta={};
   latestPerField(allRows).forEach(r=>{ if(r.plotID) meta[r.plotID]={client:r.client||'', division:r.division||'', village:r.village||'', farmer:r.farmer||''}; });
 
+  // Per-plot NDVI history, sorted ascending by satDate -- used below to
+  // find "what did NDVI say on/before this scout's visit date" for the
+  // new Crop Status column, and to compute the same Need-serious-attention
+  // streak logic the rest of the app already uses (SERIOUS_STREAK_THRESHOLD
+  // consecutive Need-attention reads), but evaluated AS OF that historical
+  // date rather than as of today -- a scout visit from 3 months ago should
+  // be compared against what NDVI showed AT THE TIME, not the plot's
+  // current status.
+  const ndviByPlot={};
+  allRows.forEach(r=>{
+    if(r.confidence==='low' || r.isS1 || !r.plotID) return;   // same exclusions computeAttentionStreaks() uses
+    if(!ndviByPlot[r.plotID]) ndviByPlot[r.plotID]=[];
+    ndviByPlot[r.plotID].push(r);
+  });
+  Object.keys(ndviByPlot).forEach(pid=> ndviByPlot[pid].sort((a,b)=>a.satDate-b.satDate));
+
+  function cropStatusOnDate(plotID, visitDateStr){
+    const hist=ndviByPlot[plotID];
+    if(!hist || !hist.length || !visitDateStr) return 'No data';
+    const visitDate=new Date(visitDateStr);
+    let idx=-1;
+    for(let i=0;i<hist.length;i++){
+      if(hist[i].satDate<=visitDate) idx=i; else break;
+    }
+    if(idx===-1) return 'No data';   // every observation is AFTER the visit -- nothing to compare against
+    const row=hist[idx];
+    if(row.status.label!=='Need attention') return row.status.label==='Good'?'Good':row.status.label==='Moderate'?'Moderate':row.status.label;
+    let streak=0;
+    for(let i=idx;i>=0;i--){
+      if(hist[i].status.label==='Need attention') streak++; else break;
+    }
+    return streak>=SERIOUS_STREAK_THRESHOLD ? 'Serious' : 'Attention';
+  }
+
   const rows=[];
   Object.keys(scoutByPlot).forEach(plotID=>{
     if(!plotIDs.has(plotID)) return;
@@ -6510,6 +6668,8 @@ function exportScoutReasonsCSV(){
     const latest=reports[0];
     if(!latest) return;
     const m=meta[plotID]||{};
+    const officer=officerMap[latest.officer_id]||'Unknown';
+    const cropStatus=cropStatusOnDate(plotID, latest.visit_date);
 
     if(latest.checklist){
       SA_CATEGORIES.forEach(cat=>{
@@ -6531,20 +6691,20 @@ function exportScoutReasonsCSV(){
             : [entry.otherText];
         }
         if(subParts.length) param+=' ('+subParts.join('/')+')';
-        rows.push([plotID, m.farmer, m.client, m.division, m.village, latest.visit_date||'', param, entry.status]);
+        rows.push([plotID, m.farmer, m.client, m.division, m.village, latest.visit_date||'', officer, cropStatus, param, entry.status]);
       });
     } else if(latest.stress_type && latest.stress_type.length){
       // Legacy report predating the checklist column -- no per-category
       // severity available, only the flat category list and one overall
       // severity for the whole visit.
       latest.stress_type.forEach(cat=>{
-        rows.push([plotID, m.farmer, m.client, m.division, m.village, latest.visit_date||'', cat+' (legacy)', latest.stress_severity||'']);
+        rows.push([plotID, m.farmer, m.client, m.division, m.village, latest.visit_date||'', officer, cropStatus, cat+' (legacy)', latest.stress_severity||'']);
       });
     }
   });
 
   if(!rows.length){ alert('No scout reports with flagged parameters in the current filter set.'); return; }
-  const hdr=['Plot No','Farmer','Mill/Client','Division','Village','Visit Date','Parameter','Severity'];
+  const hdr=['Plot No','Farmer','Mill/Client','Division','Village','Visit Date','Officer','Crop Status on Scout Date','Parameter','Severity'];
   const csv=[hdr,...rows].map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');
   const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
   a.download='scout_reasons_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
