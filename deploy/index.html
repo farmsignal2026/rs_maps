@@ -233,9 +233,9 @@ body{font-family:'DM Sans',sans-serif;background:#eef0f3;color:var(--n800);heigh
 .scv.green{color:var(--g600)}.scv.amber{color:var(--a600)}.scv.red{color:var(--r600)}.scv.blue{color:var(--b600)}
 
 /* TABS */
-.tabs{display:flex;flex-wrap:wrap;border-bottom:2px solid var(--n200)}
-.tb{padding:7px 17px;font-size:13px;font-weight:500;color:var(--n500);cursor:pointer;border:none;background:none;font-family:'DM Sans',sans-serif;position:relative;transition:color .15s}
-.tb:hover{color:var(--n800)}.tb.active{color:var(--g600)}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;border-bottom:2px solid var(--n200)}
+.tb{padding:7px 17px;font-size:13px;font-weight:600;color:var(--n600);cursor:pointer;border:1px solid var(--n200);background:none;font-family:'DM Sans',sans-serif;position:relative;transition:color .15s,background .15s,border-color .15s;border-radius:7px}
+.tb:hover{color:var(--n800);background:var(--n100)}.tb.active{color:var(--g600);font-weight:700;background:var(--g50);border-color:var(--g200)}
 .tb.active::after{content:'';position:absolute;bottom:-2px;left:0;right:0;height:2px;background:var(--g600)}
 
 /* ===================================
@@ -1275,6 +1275,7 @@ td.mono{font-family:'DM Mono',monospace;font-size:11px}
                   <button class="expbtn" onclick="scoutAnalyticsExportPNG()">⬇ PNG</button>
                 </div>
               </div>
+              <div id="saLegendActions" style="display:none;margin:2px 0 8px;gap:8px"></div>
               <div style="position:relative;width:100%;height:420px" id="scoutAnalyticsChartWrap">
                 <canvas id="scoutAnalyticsChart"></canvas>
               </div>
@@ -7985,8 +7986,8 @@ function saRenderReasons(meta, plotIDs){
   });
 
   document.getElementById('saTitle').textContent='Top reasons by '+saGroupLabel();
-  document.getElementById('saSubtitle').textContent='Moderate/Severe/Very Severe · latest scout visit per plot · sorted by most flags on top · Expect Yield shown in its own tab';
-  saDrawChart(groupNames, datasets, saMetric==='pct'?'% of flags in this group':'Number of plots flagged', true, false);
+  document.getElementById('saSubtitle').textContent='Moderate/Severe/Very Severe · latest scout visit per plot · sorted by whichever reasons are shown, most on top · Expect Yield shown in its own tab';
+  saDrawChart(groupNames, datasets, saMetric==='pct'?'% of flags in this group':'Number of plots flagged', true, false, true);
 }
 
 function saRenderYield(meta, plotIDs){
@@ -8070,7 +8071,7 @@ function saRenderFollowup(meta, plotIDs){
   saDrawChart(groupNames, datasets, saMetric==='pct'?'% of follow-ups':'Number of follow-ups');
 }
 
-function saDrawChart(labels, datasets, valueTitle, stacked, vertical){
+function saDrawChart(labels, datasets, valueTitle, stacked, vertical, dynamicSort){
   if(stacked===undefined) stacked=true;
 
   // A reason/status/outcome with zero data across every group currently
@@ -8097,7 +8098,29 @@ function saDrawChart(labels, datasets, valueTitle, stacked, vertical){
   var wrap=document.getElementById('scoutAnalyticsChartWrap');
   if(wrap) wrap.style.height = (vertical || stacked) ? '420px' : Math.max(420, labels.length*70+80)+'px';
 
+  var actionsEl = document.getElementById('saLegendActions');
+  if(dynamicSort && actionsEl){
+    actionsEl.style.display = 'flex';
+    actionsEl.innerHTML =
+      '<button class="expbtn" onclick="saShowAllCategories()" style="font-size:11px">Show all</button>'
+      +'<button class="expbtn" onclick="saHideAllCategories()" style="font-size:11px">Hide all</button>';
+  } else if(actionsEl){
+    actionsEl.style.display = 'none';
+    actionsEl.innerHTML = '';
+  }
+
   if(scoutAnalyticsChartInst){scoutAnalyticsChartInst.destroy();scoutAnalyticsChartInst=null;}
+  var legendCfg = {display:true, position:'top', labels:{font:{size:10},padding:10,usePointStyle:true,pointStyleWidth:12}};
+  if(dynamicSort){
+    // Re-sort groups by whichever categories are currently visible
+    // whenever a legend item gets toggled -- e.g. isolating "Population
+    // Gap" alone should re-order divisions by THEIR Population Gap count
+    // specifically, not stay pinned to the original all-categories order.
+    legendCfg.onClick = function(e, legendItem, legend){
+      Chart.defaults.plugins.legend.onClick.call(this, e, legendItem, legend);
+      saResortChartByVisible(legend.chart);
+    };
+  }
   scoutAnalyticsChartInst=new Chart(document.getElementById('scoutAnalyticsChart'),{
     type:'bar',
     data:{labels:labels, datasets:datasets},
@@ -8105,7 +8128,7 @@ function saDrawChart(labels, datasets, valueTitle, stacked, vertical){
       indexAxis: vertical ? 'x' : 'y',   // vertical: category axis is x (Chart.js default). horizontal: first label renders at the top.
       responsive:true, maintainAspectRatio:false,
       plugins:{
-        legend:{display:true, position:'top', labels:{font:{size:10},padding:10,usePointStyle:true,pointStyleWidth:12}},
+        legend: legendCfg,
         tooltip:{callbacks:{label:function(i){
           var v = vertical ? i.parsed.y : i.parsed.x;
           return i.dataset.label+': '+v+(saMetric==='pct'?'%':'');
@@ -8124,6 +8147,47 @@ function saDrawChart(labels, datasets, valueTitle, stacked, vertical){
       }
     }
   });
+}
+
+// Re-orders both the chart's labels and every dataset's data array (same
+// permutation applied to all, so each group's values stay correctly
+// paired with its label) by the summed value of whichever categories are
+// CURRENTLY VISIBLE -- ascending, matching the same convention
+// saSortGroupsByTotal already uses: Chart.js horizontal bars render
+// bottom-to-top, so ascending order puts the highest value at the visual
+// top.
+function saResortChartByVisible(chart){
+  var visibleIdx = chart.data.datasets.map(function(ds,i){return chart.isDatasetVisible(i);});
+  var n = chart.data.labels.length;
+  var order = chart.data.labels.map(function(_,i){return i;});
+  order.sort(function(a,b){
+    var sa=0, sb=0;
+    chart.data.datasets.forEach(function(ds,di){
+      if(!visibleIdx[di]) return;
+      sa += ds.data[a]||0;
+      sb += ds.data[b]||0;
+    });
+    return sa-sb;
+  });
+  chart.data.labels = order.map(function(i){return chart.data.labels[i];});
+  chart.data.datasets.forEach(function(ds){
+    ds.data = order.map(function(i){return ds.data[i];});
+  });
+  chart.update();
+}
+function saShowAllCategories(){
+  if(!scoutAnalyticsChartInst) return;
+  scoutAnalyticsChartInst.data.datasets.forEach(function(ds,i){
+    scoutAnalyticsChartInst.show(i);
+  });
+  saResortChartByVisible(scoutAnalyticsChartInst);
+}
+function saHideAllCategories(){
+  if(!scoutAnalyticsChartInst) return;
+  scoutAnalyticsChartInst.data.datasets.forEach(function(ds,i){
+    scoutAnalyticsChartInst.hide(i);
+  });
+  saResortChartByVisible(scoutAnalyticsChartInst);
 }
 
 // Sorts group names by total (descending) so the highest-value group ends
