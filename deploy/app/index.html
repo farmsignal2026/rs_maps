@@ -504,17 +504,17 @@ body {
 
       <!-- Field Photo Buttons -->
       <div id="pv-photos-section" style="display:none;margin-bottom:12px">
-        <div style="font-size:11px;font-weight:700;color:#5F5E5A;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">📷 Field Photos</div>
+        <div style="font-size:11px;font-weight:700;color:#5F5E5A;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">📷 Field Survey and Photos</div>
         <div style="display:flex;gap:8px">
           <button id="pv-geo-btn" onclick="showPhotoPopup('geotag')"
             style="flex:1;padding:8px 4px;border-radius:8px;border:1px solid #27500A;background:#f0f8e8;color:#27500A;font-size:12px;font-weight:600;cursor:pointer">
             📍 Geotag
           </button>
-          <button id="pv-scout-btn" onclick="showPhotoPopup('scout')"
+          <button id="pv-scout-btn" onclick="openFieldScoutDetail()"
             style="flex:1;padding:8px 4px;border-radius:8px;border:1px solid #8B4500;background:#fff8f0;color:#8B4500;font-size:12px;font-weight:600;cursor:pointer">
             🔍 Scout
           </button>
-          <button id="pv-fu-btn" onclick="showPhotoPopup('followup')"
+          <button id="pv-fu-btn" onclick="openFieldScoutDetail()"
             style="flex:1;padding:8px 4px;border-radius:8px;border:1px solid #1D4ED8;background:#eff4ff;color:#1D4ED8;font-size:12px;font-weight:600;cursor:pointer">
             🔁 Follow-up
           </button>
@@ -791,7 +791,23 @@ body {
       <span style="display:flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:#e8a5a5">
         <span style="width:10px;height:10px;border-radius:2px;background:#7f1d1d;border:1px solid #5c1414;display:inline-block"></span>Serious
       </span>
-      <span style="margin-left:auto;font-size:9px;color:#9FE1CB;opacity:0.7">Growth-stage aware</span>
+    </div>
+
+    <!-- Scout-status filter chips -->
+    <div style="background:rgba(39,80,10,0.9);padding:0 12px 6px;display:flex;align-items:center;gap:6px;flex-shrink:0;flex-wrap:wrap;overflow-x:auto">
+      <span style="font-size:9px;font-weight:600;color:#9FE1CB;text-transform:uppercase;letter-spacing:0.05em;margin-right:2px">Scout Status:</span>
+      <button id="mapchip-all" onclick="clearMapScoutFilter()" data-on-bg="#C0DD97" data-on-col="#27500A" data-off-col="#C0DD97"
+        style="font-size:10px;font-weight:700;padding:4px 10px;border-radius:12px;border:1px solid #C0DD97;background:#C0DD97;color:#27500A;cursor:pointer;white-space:nowrap">All</button>
+      <button id="mapchip-unattended" onclick="toggleMapScoutFilter('unattended')" data-on-bg="#fde8d0" data-on-col="#994800" data-off-col="#C0DD97"
+        style="font-size:10px;font-weight:600;padding:4px 10px;border-radius:12px;border:1px solid #994800;background:transparent;color:#C0DD97;cursor:pointer;white-space:nowrap">Unattended</button>
+      <button id="mapchip-scheduled" onclick="toggleMapScoutFilter('scheduled')" data-on-bg="#E6F1FB" data-on-col="#185FA5" data-off-col="#C0DD97"
+        style="font-size:10px;font-weight:600;padding:4px 10px;border-radius:12px;border:1px solid #185FA5;background:transparent;color:#C0DD97;cursor:pointer;white-space:nowrap">Scheduled</button>
+      <button id="mapchip-scouted" onclick="toggleMapScoutFilter('scouted')" data-on-bg="#FFF8DC" data-on-col="#a07800" data-off-col="#C0DD97"
+        style="font-size:10px;font-weight:600;padding:4px 10px;border-radius:12px;border:1px solid #a07800;background:transparent;color:#C0DD97;cursor:pointer;white-space:nowrap">Scouted</button>
+      <button id="mapchip-overdue" onclick="toggleMapScoutFilter('overdue')" data-on-bg="#fde8e8" data-on-col="#a00000" data-off-col="#C0DD97"
+        style="font-size:10px;font-weight:600;padding:4px 10px;border-radius:12px;border:1px solid #a00000;background:transparent;color:#C0DD97;cursor:pointer;white-space:nowrap">Overdue</button>
+      <button id="mapchip-closed" onclick="toggleMapScoutFilter('closed')" data-on-bg="#e8f8d0" data-on-col="#3B6D11" data-off-col="#C0DD97"
+        style="font-size:10px;font-weight:600;padding:4px 10px;border-radius:12px;border:1px solid #3B6D11;background:transparent;color:#C0DD97;cursor:pointer;white-space:nowrap">Closed</button>
     </div>
 
     <!-- Map container -->
@@ -3041,6 +3057,17 @@ async function loadPreviewPhotos(plotNo){
 let photoPopupAllPhotos = [];
 let photoPopupStageFilter = 'all';
 
+// Scout and Follow-up buttons on Field Preview both open the same
+// comprehensive Scout Detail screen -- it already shows the full scout
+// record (checklist, photos, date) AND a Follow-up card section when one
+// exists, so there's no need for two separate destinations. Resolves the
+// current field the same way showPhotoPopup() does.
+function openFieldScoutDetail(){
+  const f = selectedIdx !== null ? fields[selectedIdx] : null;
+  if(!f){ alert('Field not found.'); return; }
+  openScoutDetail(f.code);
+}
+
 async function showPhotoPopup(source){
   const popup = document.getElementById('photo-popup');
   const grid  = document.getElementById('photo-popup-grid');
@@ -3884,6 +3911,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
 let leafletMap=null, currentMapStyle='satellite';
 let markerLayer=null, polygonLayer=null, ndviCanvasLayer=null, mosaicLayer=null;
+let mapScoutStatusFilter=new Set(); // empty = show all -- multi-select Unattended/Scheduled/Scouted/Overdue/Closed
 // Per-field lookups (keyed by field code) so a SPECIFIC field's display
 // can be overridden independent of the global zoom-based toggle -- used
 // for showing a field's real PNG based on live GPS proximity, regardless
@@ -4483,6 +4511,46 @@ const NDVICanvasLayer = L.Layer.extend({
   }
 });
 
+// Multi-select scout-status filter chips on the Field Map. Toggling one
+// rebuilds just the marker/polygon/overlay layers (same clear+rebuild
+// pattern the map's own refresh path already uses) -- deliberately does
+// NOT call fitMapToLoadedFields(), so an officer's current pan/zoom isn't
+// yanked around every time they toggle a chip.
+function toggleMapScoutFilter(status){
+  if(mapScoutStatusFilter.has(status)) mapScoutStatusFilter.delete(status);
+  else mapScoutStatusFilter.add(status);
+  applyMapScoutFilter();
+}
+function clearMapScoutFilter(){
+  mapScoutStatusFilter.clear();
+  applyMapScoutFilter();
+}
+function applyMapScoutFilter(){
+  updMapScoutFilterChips();
+  if(!leafletMap || !markerLayer) return; // map not open yet -- chips will apply on next open
+  markerLayer.clearLayers(); polygonLayer.clearLayers(); if(mosaicLayer) mosaicLayer.clearLayers();
+  buildMapLayers();
+  const visibleCount = fields.filter(f=>f.mapped && (mapScoutStatusFilter.size===0 || mapScoutStatusFilter.has(getScoutStatus(f.code).type))).length;
+  const countEl=document.getElementById('map-field-count');
+  if(countEl) countEl.textContent = visibleCount;
+}
+function updMapScoutFilterChips(){
+  ['unattended','scheduled','scouted','overdue','closed'].forEach(function(s){
+    const chip=document.getElementById('mapchip-'+s);
+    if(!chip) return;
+    const on = mapScoutStatusFilter.has(s);
+    chip.style.background = on ? chip.dataset.onBg : 'transparent';
+    chip.style.color = on ? chip.dataset.onCol : chip.dataset.offCol;
+    chip.style.borderColor = chip.dataset.onCol;
+  });
+  const allChip=document.getElementById('mapchip-all');
+  if(allChip){
+    const on = mapScoutStatusFilter.size===0;
+    allChip.style.background = on ? '#C0DD97' : 'transparent';
+    allChip.style.color = on ? '#27500A' : '#C0DD97';
+  }
+}
+
 function buildMapLayers(){
   markerLayer=L.layerGroup();
   polygonLayer=L.layerGroup();
@@ -4498,6 +4566,10 @@ function buildMapLayers(){
   fieldGeoData.forEach(item=>{
     const f = getFieldByCode(item.code);
     if(!f) return; // skip if field not in current user's scope
+    // Multi-select scout-status filter (Unattended/Scheduled/Scouted/
+    // Overdue/Closed) -- empty set means show everything, same "clear to
+    // view all" behavior as every other multi-select filter in this app.
+    if(mapScoutStatusFilter.size>0 && !mapScoutStatusFilter.has(getScoutStatus(item.code).type)) return;
     if(!item.centroid || !item.polygon) return; // no boundary -- can't place on map, but still exists in lists
     const h=getHealth(item.healthStatus);
     const hasNdvi = item.ndvi!==null && item.ndvi!==undefined;
@@ -4703,9 +4775,10 @@ function openMapView(onReady) {
                          // previous field shouldn't persist when reopening
                          // the map, whether via the general map icon or
                          // a fresh per-field zoom request
-  const mappedCount = fields.filter(f=>f.mapped).length;
+  const mappedCount = fields.filter(f=>f.mapped && (mapScoutStatusFilter.size===0 || mapScoutStatusFilter.has(getScoutStatus(f.code).type))).length;
   const attentionCount = fields.filter(f=>f.mapped && f.needsScout).length;
   document.getElementById('map-field-count').textContent = mappedCount;
+  updMapScoutFilterChips();
 
   // Scope label -- reflects the logged-in officer's actual factory/division,
   // same convention used in the Scout/Survey Planner subtitle (was

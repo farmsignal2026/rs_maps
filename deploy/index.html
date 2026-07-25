@@ -696,7 +696,7 @@ td.mono{font-family:'DM Mono',monospace;font-size:11px}
         <button class="expbtn exp-summary-btn" style="width:100%;justify-content:center" onclick="exportSummaryCSV()" title="One row per plot, current crop status -- matches Field card view">2. Summary</button>
         <button class="expbtn" style="width:100%;justify-content:center;color:#92400e" onclick="exportPlantDateOutliers()" title="One row per plot -- only plots whose first observation already shows NDVI > 0.4 within 30 days of the recorded planting date">3. Watch Planting date outliers</button>
         <button class="expbtn" style="width:100%;justify-content:center;color:#166534" onclick="exportDivisionScoutStatusCSV()" title="One row per division -- plot counts from Unattended through Closed">4. Division scout status</button>
-        <button class="expbtn" style="width:100%;justify-content:center;color:#8B4500" onclick="exportScoutReasonsCSV()" title="Plot-wise, one row per flagged parameter and its severity (Moderate/Severe/Very Severe)">5. Scout reasons</button>
+        <button class="expbtn" style="width:100%;justify-content:center;color:#8B4500" onclick="exportScoutReasonsCSV()" title="Plot-wise, one row per flagged parameter per visit (Moderate/Severe/Very Severe) -- every scout visit across the season, not just the latest, numbered for easy pivoting">5. Scout reasons</button>
         <button class="expbtn" style="width:100%;justify-content:center;color:#185FA5" onclick="exportScoutImpactCSV()" title="Plot-wise, crop status improvement after follow-up">6. Scout impact</button>
       </div>
     </div>
@@ -6712,47 +6712,53 @@ function exportScoutReasonsCSV(){
   const rows=[];
   Object.keys(scoutByPlot).forEach(plotID=>{
     if(!plotIDs.has(plotID)) return;
-    const reports=scoutByPlot[plotID].slice().sort((a,b)=>(b.visit_date||'').localeCompare(a.visit_date||''));
-    const latest=reports[0];
-    if(!latest) return;
+    // CHANGED: every visit for this plot, not just the latest -- oldest
+    // first, numbered, so pivoting Visit # x Category in Excel gives a
+    // season-long comparison (4-5 scouts/season) instead of only ever
+    // seeing the most recent snapshot.
+    const reports=scoutByPlot[plotID].slice().sort((a,b)=>(a.visit_date||'').localeCompare(b.visit_date||''));
     const m=meta[plotID]||{};
-    const officer=officerMap[latest.officer_id]||'Unknown';
-    const cropStatus=cropStatusOnDate(plotID, latest.visit_date);
 
-    if(latest.checklist){
-      SA_CATEGORIES.forEach(cat=>{
-        const entry=latest.checklist[cat];
-        if(!entry || !['Moderate','Severe','Very Severe'].includes(entry.status)) return;
-        let param=cat;
-        // Build the bracket detail the same way for every category: named
-        // sub-categories (Pest/Disease) show as-is; wherever the officer
-        // picked "Other" (including the standalone Others category, which
-        // has no named sub-categories at all), substitute the literal
-        // "Other" placeholder with what they actually typed in
-        // entry.otherText -- e.g. "Disease (Other)" becomes
-        // "Disease (unusual leaf spotting)", and a bare "Others" with no
-        // sub-list at all becomes "Others (broken irrigation pipe)".
-        let subParts = entry.subCat ? (Array.isArray(entry.subCat)?entry.subCat.slice():[entry.subCat]) : [];
-        if(entry.otherText){
-          subParts = subParts.length
-            ? subParts.map(s=>s==='Other'?entry.otherText:s)
-            : [entry.otherText];
-        }
-        if(subParts.length) param+=' ('+subParts.join('/')+')';
-        rows.push([plotID, m.farmer, m.client, m.division, m.village, latest.visit_date||'', officer, cropStatus, param, entry.status]);
-      });
-    } else if(latest.stress_type && latest.stress_type.length){
-      // Legacy report predating the checklist column -- no per-category
-      // severity available, only the flat category list and one overall
-      // severity for the whole visit.
-      latest.stress_type.forEach(cat=>{
-        rows.push([plotID, m.farmer, m.client, m.division, m.village, latest.visit_date||'', officer, cropStatus, cat+' (legacy)', latest.stress_severity||'']);
-      });
-    }
+    reports.forEach((report,idx)=>{
+      const visitNum=idx+1;
+      const officer=officerMap[report.officer_id]||'Unknown';
+      const cropStatus=cropStatusOnDate(plotID, report.visit_date);
+
+      if(report.checklist){
+        SA_CATEGORIES.forEach(cat=>{
+          const entry=report.checklist[cat];
+          if(!entry || !['Moderate','Severe','Very Severe'].includes(entry.status)) return;
+          let param=cat;
+          // Build the bracket detail the same way for every category: named
+          // sub-categories (Pest/Disease) show as-is; wherever the officer
+          // picked "Other" (including the standalone Others category, which
+          // has no named sub-categories at all), substitute the literal
+          // "Other" placeholder with what they actually typed in
+          // entry.otherText -- e.g. "Disease (Other)" becomes
+          // "Disease (unusual leaf spotting)", and a bare "Others" with no
+          // sub-list at all becomes "Others (broken irrigation pipe)".
+          let subParts = entry.subCat ? (Array.isArray(entry.subCat)?entry.subCat.slice():[entry.subCat]) : [];
+          if(entry.otherText){
+            subParts = subParts.length
+              ? subParts.map(s=>s==='Other'?entry.otherText:s)
+              : [entry.otherText];
+          }
+          if(subParts.length) param+=' ('+subParts.join('/')+')';
+          rows.push([plotID, m.farmer, m.client, m.division, m.village, visitNum, report.visit_date||'', officer, cropStatus, param, entry.status]);
+        });
+      } else if(report.stress_type && report.stress_type.length){
+        // Legacy report predating the checklist column -- no per-category
+        // severity available, only the flat category list and one overall
+        // severity for the whole visit.
+        report.stress_type.forEach(cat=>{
+          rows.push([plotID, m.farmer, m.client, m.division, m.village, visitNum, report.visit_date||'', officer, cropStatus, cat+' (legacy)', report.stress_severity||'']);
+        });
+      }
+    });
   });
 
   if(!rows.length){ alert('No scout reports with flagged parameters in the current filter set.'); return; }
-  const hdr=['Plot No','Farmer','Mill/Client','Division','Village','Visit Date','Officer','Crop Status on Scout Date','Parameter','Severity'];
+  const hdr=['Plot No','Farmer','Mill/Client','Division','Village','Visit #','Visit Date','Officer','Crop Status on Scout Date','Parameter','Severity'];
   const csv=[hdr,...rows].map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');
   const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
   a.download='scout_reasons_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
